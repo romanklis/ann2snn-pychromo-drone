@@ -1,0 +1,49 @@
+# Attribution / provenance
+
+This project is a **port** of the 6-DoF quadcopter example from the ANN2SNN
+project, used under the terms of its MIT license (see `LICENSE`).
+
+Upstream: https://github.com/romanklis/ANN2SNN
+Branch:   `drone-example`
+Commit:   `bafe4cf62b8697bc512dee3a63319efa605d1fde`
+
+## Ported files
+
+The following upstream files were translated to a standalone numpy
+implementation (torch, Flask, web, training and estimator code removed):
+
+| upstream path                          | this project                         |
+|---------------------------------------|--------------------------------------|
+| `sim_engine/physics.py` (constants)    | `src/drone6dof/params.py`            |
+| `sim_engine/plants/quad6dof.py`        | `src/drone6dof/so3.py`, `plant.py`   |
+| `sim_engine/controllers/ds_guidance.py`| `src/drone6dof/control.py`           |
+| `sim_engine/controllers/classical.py`  | `src/drone6dof/control.py`           |
+| `sim_engine/reference.py`              | `src/drone6dof/reference.py`         |
+| `sim_engine/scene.py`                  | `src/drone6dof/scene.py`             |
+| `sim_engine/tasks.py`                  | `src/drone6dof/task.py`              |
+
+`tools/quad_snippet_original.py` is vendored **verbatim** from the same commit;
+it is the pure-numpy reference prototype used as the numerical oracle in the
+test suite.
+
+## Changes
+
+- The plant's `[p, v]` torch boundary is replaced with numpy; all internal
+  equations, clips, ZOH updates and the 500 Hz substepping are unchanged.
+- Controllers act on the **true** plant state rather than a Kalman estimate.
+  This matches the vendored prototype oracle and is a deliberate simplification
+  for a visualization demo.
+- Added a PyChrono/Irrlicht visualization layer, a pluggable `DynamicsBackend`
+  interface and Docker packaging; none of this exists upstream.
+
+## Container base image
+
+The runtime image builds on the third-party image
+`lucamarchiano/pychrono_simulator:1.0` (pinned by digest), which provides a
+source-built PyChrono that includes the Irrlicht module, plus ROS 2 Humble. This
+is required because **no** conda-forge or official `projectchrono` PyChrono
+package ships a renderer or sensors (conda-forge builds with
+`CH_ENABLE_MODULE_IRRLICHT=OFF`, `VEHICLE=OFF`, `ROS=OFF`; the `projectchrono`
+channel ships only `core`, `fea`, `robot`). The base image is third-party and is
+not audited by this project.
+

@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "drone6dof"
+version = "0.1.0"
+description = "PyChrono visualization of the ANN2SNN 6-DoF quadcopter example"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+dependencies = ["numpy>=1.24"]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.scripts]
+drone6dof = "drone6dof.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: long numerics (parity) tests"]
+addopts = "-ra"

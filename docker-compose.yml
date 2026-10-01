@@ -1,0 +1,66 @@
+services:
+  # Interactive Irrlicht window. Requires an X11 server on the host; run
+  #   xhost +local:docker
+  # once, then:  docker compose run --rm interactive
+  interactive:
+    build: .
+    image: drone6dof:latest
+    working_dir: /work
+    user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - LIBGL_ALWAYS_SOFTWARE=1
+    volumes:
+      - .:/work
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ./out:/data
+    network_mode: host
+    command:
+      - python
+      - -m
+      - drone6dof
+      - --vis
+      - irrlicht
+      - --controller
+      - ds_guidance
+
+  # Headless run (no display needed): writes telemetry to ./out.
+  headless:
+    build: .
+    image: drone6dof:latest
+    working_dir: /work
+    user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
+    environment:
+      - LIBGL_ALWAYS_SOFTWARE=1
+    volumes:
+      - .:/work
+      - ./out:/data
+    command:
+      - python
+      - -m
+      - drone6dof
+      - --vis
+      - none
+      - --controller
+      - ds_guidance
+      - --out
+      - /data/telemetry.csv
+
+  # Full test suite, including the Chrono smoke test, under Xvfb.
+  test:
+    build: .
+    image: drone6dof:latest
+    working_dir: /work
+    user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
+    environment:
+      - LIBGL_ALWAYS_SOFTWARE=1
+    volumes:
+      - .:/work
+      - ./out:/data
+    command:
+      - bash
+      - scripts/xvfb.sh
+      - python
+      - -m
+      - pytest
+      - -q
