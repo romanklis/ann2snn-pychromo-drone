@@ -29,9 +29,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--controller",
-        choices=["ds_guidance", "pid"],
+        choices=["ds_guidance", "pid", "ann", "snn"],
         default="ds_guidance",
         help="controller driving the drone (default: ds_guidance)",
+    )
+    parser.add_argument(
+        "--weights",
+        default=None,
+        help="connectome weight bundle for --controller ann|snn "
+             "(default: weights/quad6dof_connectome.npz)",
     )
     parser.add_argument(
         "--vis",
@@ -63,7 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def make_controller(name: str, scene, control_limit: float):
+def make_controller(name: str, scene, control_limit: float, weights_path=None):
     if name == "ds_guidance":
         return DSGuidanceController(
             action_limit=control_limit,
@@ -75,6 +81,13 @@ def make_controller(name: str, scene, control_limit: float):
         return ClassicalPDController(
             plant_gain=PLANT_GAIN, action_limit=control_limit, pos_dim=3
         )
+    if name in ("ann", "snn"):
+        from .connectome import ConnectomeController
+        from .weights import DEFAULT_WEIGHTS_PATH, default_fields, load_weights
+
+        path = weights_path or DEFAULT_WEIGHTS_PATH
+        bundle = load_weights(path, expect_fields=default_fields())
+        return ConnectomeController(name, bundle, action_limit=control_limit)
     raise ValueError(f"unknown controller {name!r}")
 
 
@@ -86,7 +99,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     scene = build_scene(seed=args.seed)
     params = QuadParams(inner_hz=float(args.inner_hz))
     backend = NumpyPlantBackend(params, heading_target=scene.goal_np)
-    controller = make_controller(args.controller, scene, CONTROL_LIMIT)
+    controller = make_controller(args.controller, scene, CONTROL_LIMIT, args.weights)
     sim = Simulation(
         backend,
         controller,

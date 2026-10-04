@@ -1,0 +1,10 @@
+.git
+.gitignore
+.kilo
+out
+web/node_modules
+web/dist
+server/static
+**/__pycache__
+*.pyc
+.pytest_cache

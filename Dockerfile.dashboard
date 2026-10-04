@@ -1,0 +1,30 @@
+# Dashboard image: node builds the Vite frontend, a slim Python runtime serves
+# the Flask API + static bundle. No PyChrono, no torch.
+#
+# Build: docker build -f Dockerfile.dashboard -t drone6dof-dashboard:latest .
+# Run:   docker run --rm -p 8080:8080 drone6dof-dashboard:latest
+
+FROM node:20-bookworm-slim AS web
+WORKDIR /web
+COPY web/package.json ./
+RUN npm install --no-audit --no-fund
+COPY web/ ./
+RUN npm run build            # emits to /server/static (see web/vite.config.js)
+
+FROM python:3.11-slim
+ENV PIP_NO_CACHE_DIR=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/src:/app \
+    DRONE6DOF_WEB_ROOT=/app/server/static
+
+WORKDIR /app
+COPY server/requirements.txt server/requirements.txt
+RUN pip install --no-cache-dir -r server/requirements.txt
+
+COPY src/ src/
+COPY server/ server/
+COPY weights/ weights/
+COPY --from=web /server/static server/static
+
+EXPOSE 8080
+CMD ["gunicorn", "-b", "0.0.0.0:8080", "--timeout", "300", "server.wsgi:application"]

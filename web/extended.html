@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>drone6dof · extended</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body class="extended">
+    <header>
+      <div class="brand">ANN2SNN · 6-DoF drone · extended</div>
+      <div id="badges" class="badges"></div>
+      <div class="controls">
+        <div id="picker" class="picker"></div>
+        <span id="goal-label" class="clock"></span>
+        <input id="scrub" class="scrub" type="range" min="0" max="500" value="0" />
+        <button id="full">Full traces: off</button>
+        <a class="link" href="/">← HERO</a>
+      </div>
+    </header>
+
+    <main class="extended-main">
+      <section class="lanes">
+        <div class="card"><h3>Position (m)</h3><div id="lane-pos" class="chart tall"></div></div>
+        <div class="card"><h3>Velocity (m/s)</h3><div id="lane-vel" class="chart tall"></div></div>
+        <div class="card"><h3>Attitude (deg)</h3><div id="lane-att" class="chart tall"></div></div>
+        <div class="card"><h3>Tracking error (m)</h3><div id="lane-err" class="chart tall"></div></div>
+        <div class="card"><h3>Command (m/s²)</h3><div id="lane-cmd" class="chart tall"></div></div>
+        <div class="card"><h3>Telemetry</h3><div id="lane-tele" class="chart tall"></div></div>
+      </section>
+
+      <aside class="extended-side">
+        <div class="card"><h3>Frame readout</h3><div id="readout" class="readout"></div></div>
+        <div class="card"><h3>Metrics</h3><div id="metrics" class="table"></div></div>
+        <div class="card"><h3>Weights</h3><div id="weights" class="table"></div></div>
+      </aside>
+    </main>
+    <script type="module" src="/src/extended.js"></script>
+  </body>
+</html>

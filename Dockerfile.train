@@ -1,0 +1,17 @@
+# Training image: numpy + CPU torch only (no PyChrono needed to distil the ANN).
+# Build:  docker build -f Dockerfile.train -t drone6dof-train:latest .
+# Run:    docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" -w /work \
+#           drone6dof-train:latest python -m drone6dof.train
+FROM python:3.11-slim
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PYTHONUNBUFFERED=1
+
+RUN pip install --no-cache-dir numpy \
+    && pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
+ENV PYTHONPATH=/work/src
+WORKDIR /work
+ENTRYPOINT []
+
+CMD ["python", "-m", "drone6dof.train"]

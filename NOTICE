@@ -21,6 +21,11 @@ implementation (torch, Flask, web, training and estimator code removed):
 | `sim_engine/reference.py`              | `src/drone6dof/reference.py`         |
 | `sim_engine/scene.py`                  | `src/drone6dof/scene.py`             |
 | `sim_engine/tasks.py`                  | `src/drone6dof/task.py`              |
+| `sim_engine/controllers/connectome.py` | `src/drone6dof/connectome.py`        |
+| `sim_engine/controllers/snn.py`        | `src/drone6dof/connectome.py`        |
+| `sim_engine/controllers/base.py`       | `src/drone6dof/policy.py`            |
+| `sim_engine/training.py`               | `src/drone6dof/train.py` (distillation subset) |
+| `server/app.py`, `web/*`               | `server/`, `web/` (focused dashboard port) |
 
 `tools/quad_snippet_original.py` is vendored **verbatim** from the same commit;
 it is the pure-numpy reference prototype used as the numerical oracle in the

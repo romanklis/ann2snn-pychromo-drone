@@ -81,6 +81,7 @@ class Simulation:
             "telemetry": [],
             "goal_dist": [],
             "clearance": [],
+            "spikes": [],        # first 200 neurons per frame, for spiking controllers
         }
         self._record(np.zeros(3))
         return self.observe()
@@ -139,12 +140,18 @@ class Simulation:
             getattr(self.backend, "attitude_rpy", np.zeros(3)), dtype=np.float64
         )
         tele = self.task.frame_telemetry(state, self.scene)
+        telemetry = dict(self.backend.telemetry)
+        telemetry.update(getattr(self.controller, "last_telemetry", {}) or {})
+        spikes = getattr(self.controller, "last_spikes", None)
         self.history["state"].append(state.copy())
         self.history["rpy"].append(rpy.copy())
         self.history["command"].append(np.asarray(command, dtype=np.float64).copy())
-        self.history["telemetry"].append(dict(self.backend.telemetry))
+        self.history["telemetry"].append(telemetry)
         self.history["goal_dist"].append(tele["goal_dist"])
         self.history["clearance"].append(tele["clearance"])
+        self.history["spikes"].append(
+            None if spikes is None else np.asarray(spikes, dtype=np.uint8)[:200].copy()
+        )
 
     def observe(self) -> dict:
         idx = min(self.k, len(self.reference) - 1)
@@ -184,6 +191,7 @@ class Simulation:
             if len(goal_dists)
             else False,
             "final_goal_dist_m": float(goal_dists[-1]) if len(goal_dists) else float("nan"),
+            "closest_goal_dist_m": float(goal_dists.min()) if len(goal_dists) else float("nan"),
             "mean_goal_dist_m": float(goal_dists.mean()) if len(goal_dists) else float("nan"),
             "peak_g_force": float(np.nanmax(g_forces)) if g_forces else float("nan"),
             "soc_end_pct": float(soc[-1]) if soc else float("nan"),

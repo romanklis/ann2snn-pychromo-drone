@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>drone6dof · SNN / ANN / trainer</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header>
+      <div class="brand">ANN2SNN · 6-DoF drone</div>
+      <div id="badges" class="badges"></div>
+      <div class="controls">
+        <div id="picker" class="picker"></div>
+        <div class="goal">
+          <span class="goal-label">goal</span>
+          <input id="gx" class="goal-input" type="number" step="0.1" />
+          <input id="gy" class="goal-input" type="number" step="0.1" />
+          <input id="gz" class="goal-input" type="number" step="0.1" />
+          <button id="set-goal" title="Re-run at this goal">Set</button>
+          <button id="reset-goal" title="Shipped goal (0, 0, 2.5)">Reset</button>
+        </div>
+        <span id="goal-label" class="clock"></span>
+        <span id="status" class="status"></span>
+        <button id="play" title="Play / pause">Play</button>
+        <span id="clock" class="clock">t = 0.00 s</span>
+        <a id="extended-link" class="link" href="/extended">EXTENDED ↗</a>
+      </div>
+    </header>
+
+    <main>
+      <section id="stage" class="stage"></section>
+      <aside class="side">
+        <div class="card">
+          <h3>Controller pipeline</h3>
+          <div id="pipeline" class="pipeline"></div>
+        </div>
+        <div class="card">
+          <h3>Spike activity <span id="raster-note" class="note"></span></h3>
+          <canvas id="raster" width="640" height="180"></canvas>
+        </div>
+        <div class="card">
+          <h3>Control output ‖u‖ (m/s²)</h3>
+          <div id="ctrl-chart" class="chart"></div>
+        </div>
+        <div class="card">
+          <h3>Tracking · goal distance (m)</h3>
+          <div id="track-chart" class="chart"></div>
+        </div>
+        <div class="card">
+          <h3>Safety · clearance (m)</h3>
+          <div id="clear-chart" class="chart"></div>
+        </div>
+      </aside>
+    </main>
+
+    <footer id="resultbar" class="resultbar"></footer>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

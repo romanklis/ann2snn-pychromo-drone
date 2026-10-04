@@ -133,7 +133,6 @@ class ChronoViz:
         self._rotor_angles = np.zeros(4, dtype=np.float64)
         self._spin_sign = np.array([1.0, -1.0, 1.0, -1.0])
         self._last_hud = ""
-        self._hud_element = None
         self._trail_bodies = []
         self._trail_capacity = 1
         self._goal = np.zeros(3)
@@ -294,7 +293,6 @@ class ChronoViz:
         self._add_grid()
         self._add_camera(init_state)
         self.vis.AddTypicalLights()
-        self._make_hud()
         self._is_built = True
         return self
 
@@ -323,14 +321,6 @@ class ChronoViz:
         self.vis.AddCamera(self._vec(eye), self._vec(self.to_vis(self._goal)))
         self._orbit_radius = float(np.linalg.norm(eye[:2] - center[:2]) + 1e-6)
         self._orbit_angle = 0.0
-
-    def _make_hud(self) -> None:
-        try:
-            gui = self.vis.GetGUIEnvironment()
-            rect = self.chronoirr.recti(10, 10, 560, 150)
-            self._hud_element = gui.addStaticText("", rect)
-        except Exception:
-            self._hud_element = None
 
     # -- per-frame sync ----------------------------------------------------- #
     def sync(
@@ -399,12 +389,22 @@ class ChronoViz:
             f"SoC = {tele.get('soc_pct', float('nan')):.1f}%   "
             f"sat = {int(tele.get('thrust_saturated', 0))}"
         )
+        ctrl = getattr(sim.controller, "last_telemetry", {}) or {}
+        if "spike_rate_hz" in ctrl:
+            text += (
+                f"\nrate = {ctrl['spike_rate_hz']:.0f} Hz   "
+                f"active = {ctrl.get('active_frac', 0.0) * 100.0:.0f}%   "
+                f"spikes = {int(ctrl.get('spikes_this_frame', 0))}"
+            )
+        elif "h_norm" in ctrl:
+            text += f"\nh_norm = {ctrl['h_norm']:.2f}"
         self._last_hud = text
-        if self._hud_element is not None:
-            try:
-                self._hud_element.setText(text)
-            except Exception:
-                pass
+        # The HUD is shown in the window title: Irrlicht's GUI environment is not
+        # reliably available under software GL (GetGUIEnvironment can segfault).
+        try:
+            self.vis.SetWindowTitle(text.replace("\n", "    "))
+        except Exception:
+            pass
 
     # -- render loop -------------------------------------------------------- #
     def render_loop(

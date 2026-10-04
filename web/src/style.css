@@ -1,0 +1,96 @@
+:root {
+  --bg: #0b0f14;
+  --panel: #111823;
+  --panel2: #0e141d;
+  --line: #22303c;
+  --fg: #c9d1d9;
+  --muted: #7b8a99;
+  --accent: #22b8a6;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.4 ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+}
+
+body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel2);
+}
+.brand { font-weight: 700; letter-spacing: 0.3px; color: #e6edf3; }
+.badges { display: flex; gap: 6px; flex: 1; }
+.badge {
+  padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px;
+  font-size: 11px; color: var(--muted);
+}
+.badge.ok { color: #0b0f14; background: var(--accent); border-color: var(--accent); font-weight: 700; }
+.badge.bad { color: #ffd7d7; border-color: #5a2a2a; }
+
+.controls { display: flex; align-items: center; gap: 12px; }
+.picker { display: flex; gap: 10px; flex-wrap: wrap; }
+.pick { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); cursor: pointer; }
+.pick.disabled { opacity: 0.45; cursor: not-allowed; }
+.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+
+button {
+  background: #1b2531; color: var(--fg); border: 1px solid var(--line);
+  border-radius: 6px; padding: 4px 12px; cursor: pointer; font-size: 12px;
+}
+button:hover { border-color: var(--accent); }
+.link { color: var(--accent); text-decoration: none; font-size: 12px; }
+.clock { font-variant-numeric: tabular-nums; color: var(--muted); }
+.goal { display: inline-flex; align-items: center; gap: 4px; }
+.goal-label { color: var(--muted); font-size: 11px; }
+.goal-input {
+  width: 58px; background: #0e141d; color: var(--fg);
+  border: 1px solid var(--line); border-radius: 4px; padding: 2px 4px; font-size: 11px;
+}
+.status { font-size: 11px; color: var(--accent); min-width: 70px; }
+.status.bad { color: #ff8a8a; }
+.status.busy { color: var(--muted); }
+
+main { display: grid; grid-template-columns: 1fr 460px; flex: 1; min-height: 0; }
+.stage { min-height: 0; border-right: 1px solid var(--line); }
+.side { padding: 8px; overflow: auto; display: flex; flex-direction: column; gap: 8px; }
+
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.card h3 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); font-weight: 600; }
+.note { color: var(--muted); font-weight: 400; text-transform: none; letter-spacing: 0; }
+canvas#raster { width: 100%; height: 180px; background: #0b0f14; border-radius: 4px; }
+.chart { width: 100%; }
+.tall { height: 180px; }
+
+.pipeline { font-size: 12px; }
+.pipe-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.node { padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px; background: #0e141d; }
+.arrow { color: var(--accent); }
+.pipe-note { margin-top: 6px; color: var(--muted); font-size: 11px; }
+
+.resultbar { border-top: 1px solid var(--line); background: var(--panel2); padding: 6px 14px; }
+.result-title { font-size: 10px; letter-spacing: 1px; color: var(--muted); }
+.cells { display: flex; gap: 16px; flex-wrap: wrap; font-size: 11px; }
+.cell.delta { color: var(--accent); }
+.cell.bad { color: #e0a030; }
+
+table { width: 100%; border-collapse: collapse; font-size: 11px; }
+th, td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 600; }
+tr.delta td { color: var(--accent); }
+
+/* extended */
+.extended-main { display: grid; grid-template-columns: 1fr 360px; flex: 1; min-height: 0; }
+.lanes { padding: 8px; overflow: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-content: start; }
+.extended-side { padding: 8px; overflow: auto; display: flex; flex-direction: column; gap: 8px; border-left: 1px solid var(--line); }
+.extended .readout { max-height: 260px; overflow: auto; }
+.scrub { width: 260px; accent-color: var(--accent); }

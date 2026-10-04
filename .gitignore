@@ -6,5 +6,6 @@ dist/
 .pytest_cache/
 out/
 *.csv
-*.npz
-.kilo
+web/node_modules/
+server/static/
+.kilo 

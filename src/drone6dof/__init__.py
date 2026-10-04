@@ -11,8 +11,10 @@ from .scene import Scene, SceneSpec
 from .reference import Reference, RefPoint, goal_reference
 from .task import ObstacleGoalTask
 from .control import DSGuidanceController, ClassicalPDController
+from .connectome import ConnectomeController, ConnectomeTopology, ConnectomeANN, LosslessConnectomeSNN
 from .dynamics import DynamicsBackend, NumpyPlantBackend, ChronoDynamicsBackend
 from .sim import Simulation
+from .benchmark import run_benchmark, run_controller
 
 __all__ = [
     "GRAVITY",
@@ -29,8 +31,14 @@ __all__ = [
     "ObstacleGoalTask",
     "DSGuidanceController",
     "ClassicalPDController",
+    "ConnectomeController",
+    "ConnectomeTopology",
+    "ConnectomeANN",
+    "LosslessConnectomeSNN",
     "DynamicsBackend",
     "NumpyPlantBackend",
     "ChronoDynamicsBackend",
     "Simulation",
+    "run_benchmark",
+    "run_controller",
 ]

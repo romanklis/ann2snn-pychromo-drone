@@ -46,6 +46,19 @@ services:
       - --out
       - /data/telemetry.csv
 
+  # Comparison dashboard (Flask API + Vite/Plotly frontend). Independent of the
+  # PyChrono image; open http://localhost:${PORT:-8080}.
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    image: drone6dof-dashboard:latest
+    ports:
+      - "${PORT:-8080}:8080"
+    volumes:
+      - ./weights:/app/weights:ro
+      - ./out:/app/out
+
   # Full test suite, including the Chrono smoke test, under Xvfb.
   test:
     build: .
