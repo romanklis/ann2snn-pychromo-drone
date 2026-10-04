@@ -13,7 +13,7 @@ from typing import Dict, List, Optional, Sequence
 
 import numpy as np
 
-from .config import CONTROL_LIMIT, INIT_STATE, PLANT_GAIN, STEPS, build_scene
+from .config import CONTROL_LIMIT, INIT_STATE, PLANT_GAIN, STEPS, preset_scene
 from .dynamics import NumpyPlantBackend
 from .params import DT, QuadParams
 from .sim import Simulation
@@ -201,12 +201,13 @@ def run_benchmark(
     weights_path=None,
     seed: int = 0,
     goal: Optional[Sequence[float]] = None,
+    scene_name: Optional[str] = None,
 ) -> dict:
     """Run each requested controller on one scene and return the full report.
 
-    ``goal`` overrides the shipped goal (interactive command); the scene, the
-    reference and the learned arms' inputs all follow it.  Raises ``ValueError``
-    for a malformed/out-of-bounds goal.
+    ``goal`` overrides the shipped goal (interactive command); ``scene_name``
+    selects a named obstacle preset (``pillar``, ``boxes``, ``wall``, ``slalom``).
+    Raises ``ValueError`` for a malformed goal or unknown scene.
     """
     requested = list(names) if names else [name for name, _ in CONTROLLERS]
     known = {name for name, _ in CONTROLLERS}
@@ -214,7 +215,7 @@ def run_benchmark(
     if unknown:
         raise KeyError(f"unknown controllers: {', '.join(unknown)}")
 
-    scene = build_scene(seed=seed, goal=goal)
+    scene = preset_scene(scene_name, goal=goal)
     available = available_controllers(weights_path)
 
     results: Dict[str, dict] = {}
@@ -258,6 +259,7 @@ def run_benchmark(
     return _finite({
         "example": "quad6dof",
         "scene": scene.to_dict(),
+        "scene_name": scene_name or "pillar",
         "goal": [float(v) for v in scene.goal],
         "steps": int(steps),
         "dt": float(dt),

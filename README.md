@@ -70,6 +70,27 @@ in this base image (the live window is fine).
 `pid` → `collisions>0`, `clearance_min_m<0`. The distilled `ann`/`snn` should also
 clear the pillar and reach the goal; the dashboard reports the SNN−ANN delta.
 
+## Obstacle avoidance (boxes + LiDAR)
+
+The policy is **sensor-conditioned**: it never sees obstacle identities or
+extents, only a horizontal LiDAR scan (`k=32` beams, `R_max=3 m`) plus cues
+(nearest range, bearing, slope, curvature), with range noise, missed returns and
+dropout. The analytic DS teacher is *privileged* (it uses the true geometry) and
+computes the modulation from each obstacle's closest-point normal, generalising
+the original cylinder formula to oriented boxes and cylinders; the student is
+distilled from it (teacher-student).
+
+- Geometry: `geometry.py` — signed distance, closest-point normal, ray casting.
+- Sensor: `sensor.py` — scan model + cues.
+- Teacher: `control.py` — modulation composed over the scene's obstacles.
+- Training: randomised box/cylinder layouts + goals, sensor noise in the loop
+  (`train.py`); the bundle fingerprint records the sensor config and layout spec.
+
+Preset benchmark scenes (`pillar` = shipped cylinder, `boxes`, `wall`, `slalom`)
+are selectable in the dashboard header and via `POST /api/benchmark {"scene": …}`.
+Expected: the DS teacher clears every preset; the learned ANN/SNN generalise
+within the trained distribution (report the sensor gap honestly).
+
 ## Dashboard
 
 `make dashboard` builds `Dockerfile.dashboard` (node builds the Vite frontend,
@@ -174,8 +195,8 @@ controller ───────┘
 ## Layout
 
 ```
-src/drone6dof/       plant, controllers (ds/pid/ann/snn), policy, weights, train,
-                     scene/reference/task, sim, benchmark, viz, cli
+src/drone6dof/       plant, controllers (ds/pid/ann/snn), policy, geometry, sensor,
+                     weights, train, scene/reference/task, sim, benchmark, viz, cli
 server/              Flask API (app.py, wsgi.py) + tests
 web/                 Vite + Plotly frontend (hero + extended)
 weights/             committed connectome bundle + torch reference I/O

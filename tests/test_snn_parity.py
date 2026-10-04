@@ -12,6 +12,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from drone6dof.benchmark import weights_info
 from drone6dof.connectome import (
     ConnectomeANN,
     LosslessConnectomeSNN,
@@ -19,7 +20,7 @@ from drone6dof.connectome import (
 )
 from drone6dof.weights import DEFAULT_REF_IO_PATH, DEFAULT_WEIGHTS_PATH, load_weights
 
-_HAS = Path(DEFAULT_WEIGHTS_PATH).exists() and Path(DEFAULT_REF_IO_PATH).exists()
+_HAS = bool(weights_info().get("loaded")) and Path(DEFAULT_REF_IO_PATH).exists()
 pytestmark = pytest.mark.skipif(not _HAS, reason="weights/reference bundle not built")
 
 _LIMIT = 12.0

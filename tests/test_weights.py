@@ -6,6 +6,9 @@ from pathlib import Path
 
 import pytest
 
+from drone6dof.benchmark import weights_info
+from drone6dof.config import SENSOR
+from drone6dof.policy import policy_input_dim
 from drone6dof.weights import (
     DEFAULT_WEIGHTS_PATH,
     WeightsMismatch,
@@ -14,20 +17,21 @@ from drone6dof.weights import (
     load_weights,
 )
 
-_HAS_BUNDLE = Path(DEFAULT_WEIGHTS_PATH).exists()
+_HAS_BUNDLE = bool(weights_info().get("loaded"))
 pytestmark = pytest.mark.skipif(not _HAS_BUNDLE, reason="weights bundle not built")
 
 
 def test_bundle_loads_with_expected_shapes():
     bundle = load_weights(DEFAULT_WEIGHTS_PATH, expect_fields=default_fields())
-    assert bundle["w_in"].shape == (1000, 13)
+    n_in = policy_input_dim(SENSOR)
+    assert bundle["w_in"].shape == (1000, n_in)
     assert bundle["w_out"].shape == (3, 1000)
     assert bundle["w_mag"].shape == (40000,)
     assert bundle["edges"].shape == (2, 40000)
     assert bundle["polarity"].shape == (1000,)
     assert bundle["n_neurons"] == 1000
     assert bundle["k"] == 40
-    assert bundle["n_in"] == 13
+    assert bundle["n_in"] == n_in
     assert bundle["n_out"] == 3
     assert bundle["connectome_steps"] == 3
     assert bundle["micro_steps"] == 10

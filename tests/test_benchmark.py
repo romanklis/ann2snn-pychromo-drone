@@ -69,6 +69,16 @@ def test_interactive_goal_is_used():
     assert metrics["collisions"] == 0, metrics
 
 
+def test_preset_box_scene():
+    report = run_benchmark(["ds_guidance"], steps=400, scene_name="boxes")
+    assert report["scene_name"] == "boxes"
+    assert len(report["scene"]["obstacles"]) == 2
+    metrics = report["results"]["ds_guidance"]["metrics"]
+    assert metrics["collisions"] == 0, metrics
+    with pytest.raises(ValueError):
+        run_benchmark(["ds_guidance"], steps=10, scene_name="nope")
+
+
 def test_goal_validation():
     assert validate_goal(None) is None
     assert validate_goal([1, 2, 3]) == (1.0, 2.0, 3.0)

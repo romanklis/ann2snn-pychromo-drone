@@ -17,7 +17,7 @@ from drone6dof.benchmark import (
     run_benchmark,
     weights_info,
 )
-from drone6dof.config import CONTROL_LIMIT, INIT_STATE, QUAD_SCENE, STEPS
+from drone6dof.config import CONTROL_LIMIT, INIT_STATE, PRESET_SCENES, QUAD_SCENE, STEPS
 from drone6dof.params import DT
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -59,6 +59,7 @@ def create_app() -> Flask:
                 "available": available_controllers(),
                 "weights": weights_info(),
                 "scene": QUAD_SCENE.to_dict(),
+                "scenes": sorted(PRESET_SCENES),
                 "defaults": {
                     "steps": STEPS,
                     "dt": DT,
@@ -76,7 +77,8 @@ def create_app() -> Flask:
         steps = _clamp_steps(payload.get("steps", STEPS))
         seed = int(payload.get("seed", 0) or 0)
         goal = payload.get("goal")
-        return run_benchmark(names, steps=steps, seed=seed, goal=goal)
+        scene_name = payload.get("scene")
+        return run_benchmark(names, steps=steps, seed=seed, goal=goal, scene_name=scene_name)
 
     @app.post("/api/simulate")
     def simulate():

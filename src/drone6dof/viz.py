@@ -14,6 +14,7 @@ we fall back to rotating all rendered geometry by ``R_x(-90°)``
 
 from __future__ import annotations
 
+import math
 import os
 import time
 from typing import Dict, Optional, Tuple
@@ -201,23 +202,33 @@ class ChronoViz:
         self._color(ground, chrono.ChColor(0.35, 0.38, 0.42))
         self.system.AddBody(ground)
 
-        # ---- pillar -------------------------------------------------------- #
-        obs = scene.obstacle_np
-        if obs is not None:
-            pillar = chrono.ChBodyEasyCylinder(
-                chrono.ChAxis_Z,
-                float(scene.core_radius),
-                float(scene.obstacle_height),
-                500.0,
-                False,
-                True,
-                self._material,
-            )
-            center = [float(obs[0]), float(obs[1]), float(scene.obstacle_height) / 2.0]
-            pillar.SetFixed(True)
-            pillar.SetPos(self._vec(self.to_vis(center)))
-            self._color(pillar, chrono.ChColor(0.85, 0.6, 0.2))
-            self.system.AddBody(pillar)
+        # ---- obstacles (cylinders and boxes; 2.5D vertical cross-sections) --- #
+        for obstacle in getattr(scene, "obstacles", ()) or ():
+            height = float(getattr(obstacle, "height", 2.8))
+            z0 = float(getattr(obstacle, "z0", 0.0))
+            cx, cy = float(obstacle.center[0]), float(obstacle.center[1])
+            center = [cx, cy, z0 + 0.5 * height]
+            if getattr(obstacle, "kind", "cylinder") == "cylinder":
+                body = chrono.ChBodyEasyCylinder(
+                    chrono.ChAxis_Z, float(obstacle.radius), height,
+                    500.0, False, True, self._material,
+                )
+                body.SetFixed(True)
+                body.SetPos(self._vec(self.to_vis(center)))
+            else:
+                hx, hy = float(obstacle.half[0]), float(obstacle.half[1])
+                body = chrono.ChBodyEasyBox(
+                    2.0 * hx, 2.0 * hy, height, 500.0, False, True, self._material
+                )
+                body.SetFixed(True)
+                body.SetPos(self._vec(self.to_vis(center)))
+                angle = float(getattr(obstacle, "angle", 0.0))
+                c, s = math.cos(angle), math.sin(angle)
+                rot_z = np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
+                q = _quat_from_matrix(self._map @ rot_z)
+                body.SetRot(chrono.ChQuaterniond(*q))
+            self._color(body, chrono.ChColor(0.85, 0.6, 0.2))
+            self.system.AddBody(body)
 
         # ---- goal marker --------------------------------------------------- #
         goal = chrono.ChBodyEasySphere(0.09, 1.0, False, True, self._material)

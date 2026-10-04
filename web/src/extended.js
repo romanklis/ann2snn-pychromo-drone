@@ -1,11 +1,11 @@
 import { getControllers, getHealth, runBenchmark } from "./api.js";
-import { SHORT, colorOf, DEFAULT_GOAL, readGoal } from "./runparams.js";
+import { SHORT, colorOf, DEFAULT_GOAL, readGoal, readScene } from "./runparams.js";
 import { lineChart, setCursor } from "./chart.js";
 
 const DASH = ["solid", "dash", "dot"];
 const AXIS = ["x", "y", "z"];
 
-const state = { report: null, selection: [], cursor: 0, steps: 500, seed: 0, full: false, goal: readGoal() };
+const state = { report: null, selection: [], cursor: 0, steps: 500, seed: 0, full: false, goal: readGoal(), scene: readScene() };
 const $ = (id) => document.getElementById(id);
 const fmt = (v, d = 3) => (Number.isFinite(v) ? v.toFixed(d) : "—");
 
@@ -18,6 +18,7 @@ async function boot() {
     `<span class="badge">${cat.defaults.steps} steps</span>`;
   const g = state.goal || DEFAULT_GOAL;
   $("goal-label").textContent = `goal (${g.map((v) => v.toFixed(2)).join(", ")})`;
+  $("scene-label").textContent = `scene ${state.scene}`;
 
   const box = $("picker");
   for (const c of cat.catalogue) {
@@ -47,6 +48,7 @@ async function refresh() {
     steps: state.goal ? 800 : state.steps,
     seed: state.seed,
     goal: state.goal,
+    scene: state.scene,
   });
   if (!Array.isArray(state.report.controllers) || !state.report.controllers.length) {
     $("readout").textContent = "benchmark failed: malformed report (no controllers)";

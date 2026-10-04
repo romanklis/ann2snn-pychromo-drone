@@ -57,3 +57,19 @@ export function goalError(goal) {
   }
   return null;
 }
+
+// -- benchmark scene preset (shared via the URL) ----------------------------- //
+export const DEFAULT_SCENE = "pillar";
+
+export function readScene() {
+  const name = new URLSearchParams(window.location.search).get("scene");
+  return name || DEFAULT_SCENE;
+}
+
+export function writeScene(name) {
+  const p = new URLSearchParams(window.location.search);
+  if (!name || name === DEFAULT_SCENE) p.delete("scene");
+  else p.set("scene", name);
+  const query = p.toString();
+  window.history.replaceState(null, "", query ? `?${query}` : window.location.pathname);
+}

@@ -78,7 +78,7 @@ class DSGuidanceController:
         return self.task._from_positions(p.reshape(1, 3), scene)[0]
 
     # ----------------------------------------------------------------- core
-    def _core(self, e: np.ndarray, edot: np.ndarray, feats: np.ndarray, scene: Scene):
+    def _core(self, e: np.ndarray, edot: np.ndarray, position: np.ndarray, scene: Scene):
         """The guidance law for a single ``(3,)`` sample. Returns ``u`` (m/s²)."""
         goal_dist = float(np.linalg.norm(e))
         # ---- nominal DS velocity field (rotational + radial attraction) ---- #
@@ -89,33 +89,34 @@ class DSGuidanceController:
         speed = float(np.linalg.norm(v_nom))
         v_nom = v_nom * min(self.speed_cap / (speed + _EPS), 1.0)
 
-        # ---- obstacle modulation (matrix-free form of M = I + w(EΛEᵀ − I)) -- #
-        r_core = float(feats[3])
-        dist = max(float(feats[2]) + r_core, _EPS)          # horizontal distance
-        obs_rel = np.asarray(feats[0:2], dtype=np.float64)
-        n_xy = -obs_rel / dist                              # outward normal
-        n = np.array([n_xy[0], n_xy[1], 0.0])
-        t = np.array([-n[1], n[0], 0.0])
-        if float(v_nom @ t) < 0.0:
-            t = -t
-        gamma = (dist / float(scene.dead_radius)) ** 2
-        lam_r = 1.0 - 1.0 / max(gamma, 0.05)
-        lam_t = 1.0 + 0.8 / max(gamma, 0.05)
-        s = float(
-            np.clip(
-                (float(scene.influence_radius) - dist)
-                / (float(scene.influence_radius) - float(scene.dead_radius)),
-                0.0,
-                1.0,
+        # ---- obstacle modulation (matrix-free M_i = I + w_i(E_i Λ_i E_iᵀ − I)),
+        # composed over the scene's obstacles (v ← M_k(…M_1 f)).  Each obstacle
+        # uses its closest-point outward normal, so boxes and cylinders share the
+        # same law; a cylinder's core_offset reproduces the ported pillar exactly.
+        v_des = v_nom.copy()
+        p_xy = np.asarray(position, dtype=np.float64)[:2]
+        active = 0.0
+        for obstacle in getattr(scene, "obstacles", ()) or ():
+            _, n_xy, sdf = obstacle.closest_point_normal(p_xy)
+            dist_ref = float(sdf) + float(obstacle.core_offset)
+            influence = float(obstacle.influence_radius)
+            dead = float(obstacle.dead_radius)
+            if dist_ref >= influence:
+                continue
+            n = np.array([n_xy[0], n_xy[1], 0.0])
+            t = np.array([-n[1], n[0], 0.0])
+            if float(v_des @ t) < 0.0:
+                t = -t
+            gamma = (dist_ref / dead) ** 2
+            lam_r = 1.0 - 1.0 / max(gamma, 0.05)
+            lam_t = 1.0 + 0.8 / max(gamma, 0.05)
+            s = float(np.clip((influence - dist_ref) / (influence - dead), 0.0, 1.0))
+            w = math.sin(math.pi * 0.5 * s) ** 2
+            v_des = v_des + w * (
+                (lam_r - 1.0) * float(v_des @ n) * n
+                + (lam_t - 1.0) * float(v_des @ t) * t
             )
-        )
-        w = math.sin(math.pi * 0.5 * s) ** 2
-        v_des = v_nom + w * (
-            (lam_r - 1.0) * float(v_nom @ n) * n
-            + (lam_t - 1.0) * float(v_nom @ t) * t
-        )
-        inside = 1.0 if dist < float(scene.influence_radius) else 0.0
-        v_des = v_nom + inside * (v_des - v_nom)
+            active = 1.0
 
         # ---- passive impedance toward the DS velocity --------------------- #
         dv = edot - v_des
@@ -135,7 +136,7 @@ class DSGuidanceController:
                 np.degrees(np.arccos(np.clip(cos_deflect, -1.0, 1.0)))
             ),
             "ds_goal_dist": goal_dist,
-            "ds_active": inside,
+            "ds_active": active,
             "ds_v_des": float(np.linalg.norm(v_des)),
         }
         return u
@@ -151,8 +152,7 @@ class DSGuidanceController:
         state = np.asarray(state, dtype=np.float64).reshape(-1)
         e = state[:3] - np.asarray(ref.pos, dtype=np.float64)
         edot = state[3:6] - np.asarray(ref.vel, dtype=np.float64)
-        feats = self._features_from_state(state, scene)
-        return self._core(e, edot, feats, scene)
+        return self._core(e, edot, state[:3], scene)
 
     def act(self, state: np.ndarray, ref) -> np.ndarray:
         return np.clip(self.raw_act(state, ref), -self.action_limit, self.action_limit)

@@ -1,6 +1,30 @@
 import Plotly from "plotly.js-dist-min";
 import { colorOf, SHORT, DEFAULT_GOAL } from "./runparams.js";
 
+function boxTrace(o) {
+  const [cx, cy] = o.center || [0, 0];
+  const [hx, hy] = o.half || [0.3, 0.3];
+  const a = o.angle || 0;
+  const h = o.height || 2.8;
+  const z0 = o.z0 || 0;
+  const ca = Math.cos(a), sa = Math.sin(a);
+  const corners = [ [-hx, -hy], [hx, -hy], [hx, hy], [-hx, hy] ]
+    .map(([x, y]) => [cx + ca * x - sa * y, cy + sa * x + ca * y]);
+  const X = [], Y = [], Z = [];
+  for (const [px, py] of corners) { X.push(px); Y.push(py); Z.push(z0); }
+  for (const [px, py] of corners) { X.push(px); Y.push(py); Z.push(z0 + h); }
+  const faces = [
+    [0, 1, 2], [0, 2, 3], [4, 6, 5], [4, 7, 6],
+    [0, 4, 5], [0, 5, 1], [1, 5, 6], [1, 6, 2],
+    [2, 6, 7], [2, 7, 3], [3, 7, 4], [3, 4, 0],
+  ];
+  return {
+    type: "mesh3d", x: X, y: Y, z: Z,
+    i: faces.map((f) => f[0]), j: faces.map((f) => f[1]), k: faces.map((f) => f[2]),
+    color: "#c98a2b", opacity: 0.8, name: "obstacle", showlegend: false, hoverinfo: "skip",
+  };
+}
+
 export function renderStage(div, report, selection, markerIdx = null) {
   const traces = [];
   const scene = report.scene || {};
@@ -48,13 +72,29 @@ export function renderStage(div, report, selection, markerIdx = null) {
     });
   }
 
-  const obs = scene.obstacle;
-  if (obs) {
+  const obstacles = scene.obstacles || [];
+  if (obstacles.length) {
+    for (const o of obstacles) {
+      if (o.kind === "cylinder") {
+        const h = o.height || 2.8, z0 = o.z0 || 0;
+        traces.push({
+          type: "scatter3d", mode: "lines",
+          x: [o.center[0], o.center[0]], y: [o.center[1], o.center[1]], z: [z0, z0 + h],
+          line: { color: "#c98a2b", width: 10 }, showlegend: false,
+          name: "obstacle", hoverinfo: "skip",
+        });
+      } else {
+        traces.push(boxTrace(o));
+      }
+    }
+  } else if (scene.obstacle) {
     const h = scene.obstacle_height || 2.8;
     traces.push({
       type: "scatter3d", mode: "lines",
-      x: [obs[0], obs[0]], y: [obs[1], obs[1]], z: [0, h],
-      line: { color: "#c98a2b", width: 10 }, name: "PILLAR", hoverinfo: "name",
+      x: [scene.obstacle[0], scene.obstacle[0]],
+      y: [scene.obstacle[1], scene.obstacle[1]], z: [0, h],
+      line: { color: "#c98a2b", width: 10 }, showlegend: false,
+      name: "obstacle", hoverinfo: "skip",
     });
   }
 

@@ -10,8 +10,10 @@ import dataclasses
 import math
 from typing import Optional, Sequence, Tuple
 
+from .geometry import BoxObstacle
 from .params import DT
 from .scene import Scene, SceneSpec
+from .sensor import SensorConfig
 
 __all__ = [
     "EXAMPLE_NAME",
@@ -24,7 +26,11 @@ __all__ = [
     "QUAD_SCENE",
     "DS_TEACHER_KWARGS",
     "GOAL_BOUNDS",
+    "SENSOR",
+    "OBSTACLE_LAYOUT",
+    "PRESET_SCENES",
     "validate_goal",
+    "preset_scene",
     "build_scene",
 ]
 
@@ -54,6 +60,23 @@ QUAD_SCENE = SceneSpec(
 #: Teacher kwargs from the example (cap 1.4 so the nominal DS still clears the
 #: pillar; radial gain 0.6).
 DS_TEACHER_KWARGS = {"speed_cap": 1.4, "ds_radial_gain": 0.6}
+
+#: LiDAR model for the sensor-conditioned policy (see :mod:`drone6dof.sensor`).
+SENSOR = SensorConfig()
+
+#: Obstacle distribution the policy is trained on (randomised box layouts).
+OBSTACLE_LAYOUT = {
+    "max_obstacles": 3,
+    "n_obstacles_choices": [1, 2, 3],
+    "box_half_min": 0.15,
+    "box_half_max": 0.5,
+    "cylinder_radius_min": 0.2,
+    "cylinder_radius_max": 0.4,
+    "region_x": 2.5,
+    "region_y": 2.5,
+    "min_clearance": 0.4,
+    "use_cylinders": True,
+}
 
 #: Allowed interactive goal range (metres): keeps a commanded goal inside the
 #: flight box the demo is validated for.
@@ -94,3 +117,33 @@ def build_scene(seed: int = 0, goal: Optional[Sequence[float]] = None) -> Scene:
     if goal is not None:
         scene = dataclasses.replace(scene, goal=goal)
     return scene
+
+
+def _box(cx, cy, hx, hy, angle=0.0):
+    return BoxObstacle(center=(float(cx), float(cy)), half=(float(hx), float(hy)), angle=float(angle))
+
+
+#: Named benchmark scenes (boxes/cylinders; 2.5D vertical cross-sections).
+PRESET_SCENES = {
+    "pillar": lambda: (),
+    "boxes": lambda: (
+        _box(-1.0, 0.0, 0.35, 0.35, 0.4),
+        _box(0.8, 1.2, 0.45, 0.25, -0.6),
+    ),
+    "wall": lambda: (_box(-0.5, 0.0, 0.15, 1.0, 0.0),),
+    "slalom": lambda: (
+        _box(-1.2, 0.6, 0.3, 0.3, 0.3),
+        _box(0.0, -0.8, 0.3, 0.3, -0.3),
+        _box(1.2, 0.6, 0.3, 0.3, 0.0),
+    ),
+}
+
+
+def preset_scene(name: Optional[str] = None, goal: Optional[Sequence[float]] = None) -> Scene:
+    """Scene for a named preset (``pillar`` = the shipped single cylinder)."""
+    if not name or name == "pillar":
+        return build_scene(goal=goal)
+    if name not in PRESET_SCENES:
+        raise ValueError(f"unknown scene {name!r}; choose from {sorted(PRESET_SCENES)}")
+    resolved_goal = validate_goal(goal) or (0.0, 0.0, 2.5)
+    return Scene(goal=tuple(resolved_goal), obstacles=PRESET_SCENES[name](), seed=0)

@@ -64,6 +64,25 @@ def test_benchmark_goal_is_used(client):
     assert body["scene"]["goal"] == [1.0, 1.0, 1.5]
 
 
+def test_benchmark_scene_is_used(client):
+    r = client.post(
+        "/api/benchmark",
+        json={"controllers": ["ds_guidance"], "steps": 20, "scene": "boxes"},
+    )
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["scene_name"] == "boxes"
+    assert len(body["scene"]["obstacles"]) == 2
+
+
+def test_unknown_scene_is_400(client):
+    r = client.post(
+        "/api/benchmark",
+        json={"controllers": ["ds_guidance"], "steps": 20, "scene": "nope"},
+    )
+    assert r.status_code == 400
+
+
 def test_out_of_bounds_goal_is_400(client):
     r = client.post(
         "/api/benchmark",

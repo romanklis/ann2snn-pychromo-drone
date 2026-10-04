@@ -16,6 +16,7 @@ confirms the distilled network actually flies the obstacle course.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import time
 from pathlib import Path
 from typing import Optional, Tuple
@@ -27,16 +28,21 @@ from .config import (
     DS_TEACHER_KWARGS,
     GOAL_BOUNDS,
     INIT_STATE,
+    OBSTACLE_LAYOUT,
     PLANT_GAIN,
+    SENSOR,
     STEPS,
     build_scene,
 )
 from .connectome import ConnectomeController, ConnectomeTopology, DEFAULTS
 from .control import DSGuidanceController
 from .dynamics import NumpyPlantBackend
+from .geometry import BoxObstacle, Cylinder
 from .params import DT, QuadParams
 from .policy import error_vector
 from .reference import RefPoint, goal_reference
+from .scene import Scene
+from .sensor import SensorConfig, sensor_features
 from .sim import Simulation
 from .task import ObstacleGoalTask
 from .weights import DEFAULT_REF_IO_PATH, DEFAULT_WEIGHTS_PATH, default_fields, save_weights
@@ -47,12 +53,61 @@ __all__ = ["main", "build_dataset", "train_connectome"]
 BOUNDS_HIGH = (2.5, 2.5, 3.0)
 
 
-def _input(state: np.ndarray, ref, scene, task: ObstacleGoalTask) -> np.ndarray:
-    """13-D policy input with ``u_ff = 0`` (the constant-goal feed-forward)."""
+def _input(state: np.ndarray, ref, scene, sensor: SensorConfig, rng) -> np.ndarray:
+    """Sensor-conditioned policy input with ``u_ff = 0`` (constant-goal case)."""
     state = np.asarray(state, dtype=np.float64).reshape(-1)
     err = error_vector(state, ref, 3)
-    feats = task._from_positions(state[:3].reshape(1, 3), scene)[0]
-    return np.concatenate([err, np.zeros(3), feats]).astype(np.float64)
+    scan = sensor_features(state[:2], getattr(scene, "obstacles", ()), sensor, rng)
+    return np.concatenate([err, np.zeros(3), scan]).astype(np.float64)
+
+
+def _sample_layout(rng: np.random.Generator, goal, start_xy) -> Tuple:
+    """Random non-overlapping box/cylinder layout away from start and goal."""
+    spec = OBSTACLE_LAYOUT
+    choices = list(spec["n_obstacles_choices"])
+    n = int(choices[int(rng.integers(len(choices)))])
+    goal_xy = np.asarray(goal, dtype=np.float64)[:2]
+    start_xy = np.asarray(start_xy, dtype=np.float64)[:2]
+    obstacles = []
+    for _ in range(400):
+        if len(obstacles) >= n:
+            break
+        cx = float(rng.uniform(-spec["region_x"], spec["region_x"]))
+        cy = float(rng.uniform(-spec["region_y"], spec["region_y"]))
+        if spec["use_cylinders"] and rng.random() < 0.25:
+            radius = float(rng.uniform(spec["cylinder_radius_min"], spec["cylinder_radius_max"]))
+            obs = Cylinder(
+                center=(cx, cy), radius=radius,
+                dead_radius=max(0.35, radius + 0.3),
+                influence_radius=max(0.9, radius + 0.8),
+            )
+            extent = radius
+        else:
+            hx = float(rng.uniform(spec["box_half_min"], spec["box_half_max"]))
+            hy = float(rng.uniform(spec["box_half_min"], spec["box_half_max"]))
+            angle = float(rng.uniform(0.0, np.pi)) if rng.random() < 0.5 else 0.0
+            obs = BoxObstacle(center=(cx, cy), half=(hx, hy), angle=angle)
+            extent = float(np.hypot(hx, hy))
+        margin = float(spec["min_clearance"])
+        if np.hypot(cx - start_xy[0], cy - start_xy[1]) < extent + margin:
+            continue
+        if np.hypot(cx - goal_xy[0], cy - goal_xy[1]) < extent + margin:
+            continue
+        if any(obs.signed_distance(o.center_np) < 0.3 for o in obstacles):
+            continue
+        obstacles.append(obs)
+    return tuple(obstacles)
+
+
+def _scene_pool(base_scene, rng: np.random.Generator, n_scenes: int) -> list:
+    """A pool of scenes: the shipped one first, then randomised box layouts."""
+    pool = [base_scene]
+    start_xy = np.asarray(INIT_STATE, dtype=np.float64)[:2]
+    for _ in range(max(0, int(n_scenes) - 1)):
+        goal = _sample_goal(rng, base_scene)
+        obstacles = _sample_layout(rng, goal, start_xy)
+        pool.append(Scene(goal=tuple(float(v) for v in goal), obstacles=obstacles))
+    return pool
 
 
 def _sample_goal(rng: np.random.Generator, scene) -> np.ndarray:
@@ -75,48 +130,48 @@ def build_dataset(
     n_random: int = 40000,
     n_rollout: int = 500,
     seed: int = 0,
-    n_rollout_goals: int = 3,
+    n_rollout_goals: int = 6,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Teacher ``(state -> accel)`` samples over **randomised goals**.
+    """Teacher samples over randomised goals **and box layouts**, sensor in the loop.
 
-    Goal randomisation is what lets the learned arms be commanded to arbitrary
-    locations interactively (the teacher is goal-relative; the students must see
-    that distribution).  ``n_rollout`` frames are rolled out for each of
-    ``n_rollout_goals`` goals (the shipped goal first), and the coverage samples
-    each get their own sampled goal.
+    A pool of scenes (the shipped one first, then randomised box/cylinder layouts)
+    is rolled out closed-loop with the teacher; coverage states are drawn uniformly
+    and labelled with the teacher for a scene sampled from the pool.  The policy
+    input is the noisy LiDAR scan, so the student never sees obstacle parameters.
     """
     task = ObstacleGoalTask(goal_tolerance=0.30)
     teacher = DSGuidanceController(
         action_limit=CONTROL_LIMIT, scene=scene, task=task, **DS_TEACHER_KWARGS
     )
     rng = np.random.default_rng(int(seed))
+    pool = _scene_pool(scene, rng, max(1, int(n_rollout_goals)))
     xs, ys = [], []
 
-    goals = [scene.goal_np] + [
-        _sample_goal(rng, scene) for _ in range(max(1, int(n_rollout_goals)) - 1)
-    ]
-    for goal in goals:
-        ref = goal_reference(steps=n_rollout, goal=goal, dt=DT, meta={"scene": scene})
+    for layout_scene in pool:
+        goal = layout_scene.goal_np
+        ref = goal_reference(steps=n_rollout, goal=goal, dt=DT, meta={"scene": layout_scene})
         backend = NumpyPlantBackend(QuadParams(), heading_target=goal)
         state = backend.reset(np.asarray(INIT_STATE, dtype=np.float64))
         for k in range(int(n_rollout)):
             rp = ref.at(k)
             u = teacher.act(state, rp)
-            xs.append(_input(state, rp, scene, task))
+            xs.append(_input(state, rp, layout_scene, SENSOR, rng))
             ys.append(u)
             state = backend.step(u, dt=DT, limit=CONTROL_LIMIT, gain=PLANT_GAIN)
 
-    # coverage: uniform positions in the flight box, each with a sampled goal
+    # coverage: uniform positions/velocities, a scene from the pool, sensor noise
     hi = np.asarray(BOUNDS_HIGH, dtype=np.float64)
     pos = rng.uniform(-hi, hi, size=(n_random, 3))
     pos[:, 2] = rng.uniform(0.0, hi[2], size=n_random)
     vel = rng.normal(0.0, 0.8, size=(n_random, 3))
-    zeros3 = np.zeros(3, dtype=np.float64)
     for i in range(int(n_random)):
-        goal = _sample_goal(rng, scene)
-        rp = RefPoint(pos=goal, vel=zeros3, acc=zeros3, meta={"scene": scene})
+        layout_scene = pool[int(rng.integers(len(pool)))]
+        ref = goal_reference(
+            steps=1, goal=layout_scene.goal_np, dt=DT, meta={"scene": layout_scene}
+        )
+        rp = ref.at(0)
         s = np.concatenate([pos[i], vel[i]])
-        xs.append(_input(s, rp, scene, task))
+        xs.append(_input(s, rp, layout_scene, SENSOR, rng))
         ys.append(teacher.act(s, rp))
 
     return np.asarray(xs, dtype=np.float64), np.asarray(ys, dtype=np.float64)
@@ -129,12 +184,12 @@ def build_sequences(
     traj_len: int = 500,
     seed: int = 0,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Teacher-driven trajectories ``(n_traj, traj_len, 13)`` / ``(…, 3)``.
+    """Teacher-driven trajectories over the pooled scenes, hidden state carried.
 
-    One nominal DS rollout plus perturbed initial conditions, each toward a
-    **randomly sampled goal** (the shipped goal for the first trajectory).  Training
-    on these with the hidden state carried matches deployment and teaches the
-    students the goal-relative field they need for interactive goal commands.
+    The first trajectory is the shipped scene; the rest use randomised box
+    layouts and goals.  Training on these with the hidden state carried matches
+    deployment (this is what stops the behaviour-cloning drift) and teaches the
+    sensor-conditioned field for many shapes at once.
     """
     task = ObstacleGoalTask(goal_tolerance=0.30)
     teacher = DSGuidanceController(
@@ -142,11 +197,13 @@ def build_sequences(
     )
     rng = np.random.default_rng(int(seed))
     hi = np.asarray(BOUNDS_HIGH, dtype=np.float64)
+    pool = _scene_pool(scene, rng, max(1, int(n_traj)))
 
     xs_all, ys_all = [], []
     for i in range(int(n_traj)):
-        goal = scene.goal_np if i == 0 else _sample_goal(rng, scene)
-        ref = goal_reference(steps=traj_len, goal=goal, dt=DT, meta={"scene": scene})
+        layout_scene = pool[i % len(pool)]
+        goal = layout_scene.goal_np
+        ref = goal_reference(steps=traj_len, goal=goal, dt=DT, meta={"scene": layout_scene})
         if i == 0:
             state = np.asarray(INIT_STATE, dtype=np.float64)
         else:
@@ -159,7 +216,7 @@ def build_sequences(
         xs, ys = [], []
         for k in range(int(traj_len)):
             rp = ref.at(k)
-            xs.append(_input(state, rp, scene, task))
+            xs.append(_input(state, rp, layout_scene, SENSOR, rng))
             ys.append(teacher.act(state, rp))
             state = backend.step(ys[-1], dt=DT, limit=CONTROL_LIMIT, gain=PLANT_GAIN)
         xs_all.append(xs)
@@ -302,11 +359,12 @@ def _reference_io(scene, bundle: dict, *, frames: int = 64, seed: int = 0):
     )
     backend = NumpyPlantBackend(QuadParams(), heading_target=scene.goal_np)
     state = backend.reset(np.asarray(INIT_STATE, dtype=np.float64))
+    rng = np.random.default_rng(int(seed))
 
     inputs = []
     for k in range(frames):
         rp = ref.at(k)
-        inputs.append(_input(state, rp, scene, task))
+        inputs.append(_input(state, rp, scene, SENSOR, rng))
         u = teacher.act(state, rp)
         state = backend.step(u, dt=DT, limit=CONTROL_LIMIT, gain=PLANT_GAIN)
     x = np.asarray(inputs, dtype=np.float64)

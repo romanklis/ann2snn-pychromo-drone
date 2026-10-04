@@ -11,12 +11,14 @@ from typing import Optional, Tuple
 
 import numpy as np
 
+from .geometry import Cylinder
+
 __all__ = ["Scene", "SceneSpec"]
 
 
 @dataclass(frozen=True)
 class Scene:
-    """One instantiated scene: goal point and an optional vertical cylinder."""
+    """One instantiated scene: goal point and a set of vertical obstacles."""
 
     goal: Tuple[float, float, float] = (0.0, 0.0, 2.5)
     obstacle: Optional[Tuple[float, float, float]] = None
@@ -26,6 +28,22 @@ class Scene:
     #: Visual height of the cylinder [m] (the clearance metric is horizontal only).
     obstacle_height: float = 2.8
     seed: int = 0
+    #: Explicit obstacle geometries (boxes/cylinders).  The legacy single
+    #: ``obstacle`` cylinder is materialised here when this is empty.
+    obstacles: Tuple = ()
+
+    def __post_init__(self) -> None:
+        if not self.obstacles and self.obstacle is not None:
+            cyl = Cylinder(
+                center=(float(self.obstacle[0]), float(self.obstacle[1])),
+                radius=float(self.core_radius),
+                height=float(self.obstacle_height),
+                core_offset=float(self.core_radius),
+                # centre-based thresholds reproduce the ported behaviour exactly
+                dead_radius=float(self.dead_radius),
+                influence_radius=float(self.influence_radius),
+            )
+            object.__setattr__(self, "obstacles", (cyl,))
 
     @property
     def goal_np(self) -> np.ndarray:
@@ -36,28 +54,24 @@ class Scene:
         return None if self.obstacle is None else np.asarray(self.obstacle, dtype=np.float64)
 
     def clearance(self, point) -> float:
-        """Horizontal distance from ``point`` to the obstacle surface.
-
-        Positive outside the core, negative inside it, ``inf`` when there is no
-        obstacle.  Only the horizontal distance matters: the pillar is vertical.
-        """
-        obs = self.obstacle_np
-        if obs is None:
+        """Minimum signed distance to any obstacle surface (``inf`` with none)."""
+        if not self.obstacles:
             return float("inf")
-        p = np.asarray(point, dtype=np.float64).reshape(-1)
-        return float(np.hypot(p[0] - obs[0], p[1] - obs[1]) - self.core_radius)
+        return float(min(o.signed_distance(point) for o in self.obstacles))
 
     def clearance_series(self, trajectory) -> np.ndarray:
         traj = np.asarray(trajectory)
-        if self.obstacle is None:
+        if not self.obstacles:
             return np.full(len(traj), np.inf)
-        obs = self.obstacle_np
-        return np.hypot(traj[:, 0] - obs[0], traj[:, 1] - obs[1]) - self.core_radius
+        return np.min(
+            np.stack([o.signed_distance_batch(traj) for o in self.obstacles]), axis=0
+        )
 
     def to_dict(self) -> dict:
         return {
             "goal": [float(v) for v in self.goal],
             "obstacle": None if self.obstacle is None else [float(v) for v in self.obstacle],
+            "obstacles": [o.to_dict() for o in self.obstacles],
             "core_radius": float(self.core_radius),
             "influence_radius": float(self.influence_radius),
             "dead_radius": float(self.dead_radius),

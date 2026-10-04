@@ -1,18 +1,15 @@
 """Policy input and reference-acceleration feed-forward.
 
-Numpy port of ``BaseController.policy_input`` and ``ReferenceAccelEstimator``
-from the ANN2SNN ``drone-example`` branch (MIT); see ``NOTICE``.
+Numpy port of ``BaseController.policy_input`` / ``ReferenceAccelEstimator`` from
+the ANN2SNN ``drone-example`` branch (MIT); see ``NOTICE``.
 
-The policy input for the ``quad6dof`` example is
+The obstacle part of the input is now **sensor-derived** (a horizontal LiDAR
+scan + cues) rather than oracle geometry: the policy sees
 
-    [e (3), ė (3), u_ff (3), task features (4)]        (13,)
+    [e (3), ė (3), u_ff (3), ranges (k), min_range, bearing (2), slope, curvature]
 
-with ``e = p - r``, ``ė = v - ṙ``, ``u_ff = â_ref / plant_gain`` (the reference
-acceleration reconstructed from the state, ``0`` for the constant goal), and the
-four ``ObstacleGoalTask`` columns ``[obs_rel_x, obs_rel_y, clearance, core_radius]``.
-
-Unlike upstream, the state here is the **true** plant state, not a Kalman
-estimate (the same simplification the ported DS/PID controllers use).
+so it must infer the obstacle shape from the scan.  The reference-accel
+feed-forward is ``u_ff = â_ref / plant_gain`` (zero for a constant goal).
 """
 
 from __future__ import annotations
@@ -22,10 +19,14 @@ from typing import Optional
 import numpy as np
 
 from .params import DT
-from .scene import Scene
-from .task import ObstacleGoalTask
+from .sensor import SensorConfig, sensor_features
 
-__all__ = ["error_vector", "ReferenceAccelEstimator", "policy_input", "POLICY_IN_DIM"]
+__all__ = [
+    "error_vector",
+    "ReferenceAccelEstimator",
+    "policy_input",
+    "policy_input_dim",
+]
 
 
 def error_vector(state: np.ndarray, ref, pos_dim: int = 3) -> np.ndarray:
@@ -70,24 +71,27 @@ class ReferenceAccelEstimator:
         return a_hat / self.gain
 
 
-#: policy-input width for the 3-D task: 3·pos_dim + n_features
-POLICY_IN_DIM = 3 * 3 + ObstacleGoalTask().n_features
+def policy_input_dim(sensor: SensorConfig, pos_dim: int = 3) -> int:
+    """Width of :func:`policy_input`: ``3·pos_dim`` for ``err``+``u_ff`` plus the scan."""
+    return 3 * int(pos_dim) + int(sensor.input_dim)
 
 
 def policy_input(
     state: np.ndarray,
     ref,
-    scene: Scene,
+    scene,
     estimator: ReferenceAccelEstimator,
-    task: Optional[ObstacleGoalTask] = None,
+    task=None,
     *,
+    sensor: Optional[SensorConfig] = None,
+    rng: Optional[np.random.Generator] = None,
     pos_dim: int = 3,
 ) -> np.ndarray:
-    """Assemble the ``(3·pos_dim + F,)`` policy input for one frame."""
-    task = task or ObstacleGoalTask()
+    """Assemble the sensor-conditioned policy input for one frame."""
+    sensor = sensor or SensorConfig()
     d = int(pos_dim)
     state = np.asarray(state, dtype=np.float64).reshape(-1)
     err = error_vector(state, ref, d)
     u_ff = estimator.update(state, ref)
-    feats = task._from_positions(state[:d].reshape(1, d), scene)[0]
-    return np.concatenate([err, u_ff, feats]).astype(np.float64)
+    scan_feats = sensor_features(state[:2], getattr(scene, "obstacles", ()), sensor, rng)
+    return np.concatenate([err, u_ff, scan_feats]).astype(np.float64)

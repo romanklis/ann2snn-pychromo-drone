@@ -24,6 +24,7 @@ from typing import Dict, Optional
 import numpy as np
 
 from .policy import ReferenceAccelEstimator, policy_input
+from .sensor import SensorConfig
 from .task import ObstacleGoalTask
 
 __all__ = [
@@ -201,6 +202,7 @@ class ConnectomeController:
         dt: float = 0.02,
         action_limit: float = 12.0,
         task: Optional[ObstacleGoalTask] = None,
+        sensor: Optional[SensorConfig] = None,
     ) -> None:
         kind = str(kind).lower()
         if kind not in ("ann", "snn"):
@@ -211,6 +213,8 @@ class ConnectomeController:
         self.task = task or ObstacleGoalTask()
         self.dt = float(dt)
         self.estimator = ReferenceAccelEstimator(dt=self.dt, plant_gain=1.0, pos_dim=3)
+        self.sensor = sensor or SensorConfig()
+        self._rng = np.random.default_rng(self.sensor.seed)
 
         edges = np.asarray(bundle["edges"], dtype=np.int64)
         polarity = np.asarray(bundle["polarity"], dtype=np.float64)
@@ -234,13 +238,17 @@ class ConnectomeController:
     def reset(self) -> None:
         self.net.reset()
         self.estimator.reset()
+        self._rng = np.random.default_rng(self.sensor.seed)
         self._last = {}
 
     def act(self, state: np.ndarray, ref) -> np.ndarray:
         scene = (getattr(ref, "meta", None) or {}).get("scene")
         if scene is None:
             raise ValueError("the connectome controller needs ref.meta['scene']")
-        x = policy_input(state, ref, scene, self.estimator, self.task, pos_dim=3)
+        x = policy_input(
+            state, ref, scene, self.estimator, self.task,
+            sensor=self.sensor, rng=self._rng, pos_dim=3,
+        )
         u = self.net.forward_input(x)
         if self.kind == "ann":
             self._last = dict(self.net.last_telemetry)

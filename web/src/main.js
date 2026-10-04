@@ -1,5 +1,5 @@
 import { getControllers, getHealth, runBenchmark } from "./api.js";
-import { DEFAULT_SELECTION, SHORT, colorOf, DEFAULT_GOAL, readGoal, writeGoal, goalError } from "./runparams.js";
+import { DEFAULT_SELECTION, SHORT, colorOf, DEFAULT_GOAL, readGoal, writeGoal, goalError, readScene, writeScene } from "./runparams.js";
 import { renderStage } from "./stage.js";
 import { drawRaster } from "./raster.js";
 import { lineChart, setCursor } from "./chart.js";
@@ -13,6 +13,7 @@ const state = {
   seed: 0,
   startTime: 0,
   goal: readGoal(),
+  scene: readScene(),
 };
 
 const $ = (id) => document.getElementById(id);
@@ -22,6 +23,7 @@ async function boot() {
     const [health, cat] = await Promise.all([getHealth(), getControllers()]);
     renderBadges(health, cat);
     buildPicker(cat);
+    buildSceneSelect(cat.scenes);
   } catch (err) {
     $("badges").textContent = `server error: ${err.message}`;
     return;
@@ -138,6 +140,7 @@ async function refresh() {
       steps: state.goal ? 800 : state.steps,
       seed: state.seed,
       goal: state.goal,
+      scene: state.scene,
     });
   } catch (err) {
     $("resultbar").textContent = `benchmark failed: ${err.message}`;
@@ -163,6 +166,20 @@ function renderBadges(health, cat) {
     w.fingerprint ? `<span class="badge">fp ${String(w.fingerprint).slice(0, 8)}</span>` : "",
   ];
   $("badges").innerHTML = bits.join("");
+}
+
+function buildSceneSelect(scenes) {
+  const sel = $("scene");
+  const names = Array.isArray(scenes) && scenes.length ? scenes : ["pillar"];
+  sel.innerHTML = names.map((n) => `<option value="${n}">${n}</option>`).join("");
+  if (!names.includes(state.scene)) state.scene = names[0];
+  sel.value = state.scene;
+  sel.addEventListener("change", () => {
+    state.scene = sel.value;
+    writeScene(state.scene);
+    updateExtendedLink();
+    withBusy("computing", () => refresh());
+  });
 }
 
 function buildPicker(cat) {

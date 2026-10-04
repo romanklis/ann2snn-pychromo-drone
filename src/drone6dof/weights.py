@@ -16,9 +16,17 @@ from typing import Dict, Optional
 
 import numpy as np
 
-from .config import CONTROL_LIMIT, INIT_STATE, QUAD_SCENE, DS_TEACHER_KWARGS
+from .config import (
+    CONTROL_LIMIT,
+    DS_TEACHER_KWARGS,
+    INIT_STATE,
+    OBSTACLE_LAYOUT,
+    QUAD_SCENE,
+    SENSOR,
+)
 from .params import DT, QuadParams
-from .policy import POLICY_IN_DIM
+from .policy import policy_input_dim
+from .sensor import SensorConfig
 
 __all__ = [
     "FORMAT",
@@ -33,7 +41,7 @@ __all__ = [
     "DEFAULT_REF_IO_PATH",
 ]
 
-FORMAT = "ann2snn.drone6dof.connectome@1"
+FORMAT = "ann2snn.drone6dof.connectome@2"
 
 #: repo-root ``weights/`` (src/drone6dof/weights.py -> parents[2])
 _WEIGHTS_DIR = Path(__file__).resolve().parents[2] / "weights"
@@ -66,14 +74,18 @@ def make_fields(
     v_th: float = 1.0,
     seed: int = 42,
     state_source: str = "true",
+    sensor: Optional[SensorConfig] = None,
+    layout: Optional[Dict] = None,
 ) -> Dict:
     """Canonical behavioural config the bundle is valid for."""
     params = params or QuadParams()
     teacher_kwargs = teacher_kwargs if teacher_kwargs is not None else DS_TEACHER_KWARGS
+    sensor = sensor or SENSOR
+    layout = layout if layout is not None else OBSTACLE_LAYOUT
     return {
         "format": FORMAT,
         "pos_dim": 3,
-        "n_in": POLICY_IN_DIM,
+        "n_in": policy_input_dim(sensor),
         "n_out": 3,
         "control_limit": float(control_limit),
         "init_state": [float(v) for v in init_state],
@@ -84,6 +96,8 @@ def make_fields(
         "v_th": float(v_th),
         "inner_hz": float(params.inner_hz),
         "state_source": state_source,
+        "sensor": sensor.to_dict(),
+        "layout": dict(layout),
     }
 
 
@@ -100,6 +114,8 @@ def default_fields(**overrides) -> Dict:
         v_th=1.0,
         seed=42,
         state_source="true",
+        sensor=SENSOR,
+        layout=OBSTACLE_LAYOUT,
     )
     base.update(overrides)
     return make_fields(**base)
