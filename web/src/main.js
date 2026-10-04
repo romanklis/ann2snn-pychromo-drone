@@ -1,6 +1,6 @@
 import { getControllers, getHealth, runBenchmark } from "./api.js";
 import { DEFAULT_SELECTION, SHORT, colorOf, DEFAULT_GOAL, readGoal, writeGoal, goalError, readScene, writeScene } from "./runparams.js";
-import { renderStage } from "./stage.js";
+import { buildStage, updateStage } from "./stage.js";
 import { drawRaster } from "./raster.js";
 import { lineChart, setCursor } from "./chart.js";
 
@@ -22,6 +22,7 @@ const state = {
 };
 
 const $ = (id) => document.getElementById(id);
+let stageRefs = null;
 
 async function boot() {
   try {
@@ -38,7 +39,19 @@ async function boot() {
   $("play").addEventListener("click", togglePlay);
   renderPipeline();
   initGoal();
+  initKeyboard();
   requestAnimationFrame(tick);
+}
+
+function initKeyboard() {
+  // Space / Enter toggle play-pause (unless typing in a field or on the button).
+  window.addEventListener("keydown", (e) => {
+    if (e.key !== " " && e.key !== "Enter") return;
+    const tag = (e.target && e.target.tagName) || "";
+    if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || tag === "BUTTON") return;
+    e.preventDefault();
+    togglePlay();
+  });
 }
 
 function initGoal() {
@@ -109,7 +122,7 @@ async function applyGoal(goal) {
   // while the (seconds-long) re-run is in flight.
   if (state.report && Array.isArray(state.report.controllers)) {
     state.report.goal = goal || DEFAULT_GOAL;
-    renderStage($("stage"), state.report, state.report.controllers, null, vizOpts());
+    stageRefs = buildStage($("stage"), state.report, state.report.controllers, vizOpts());
   }
   return refresh();
 }
@@ -186,7 +199,11 @@ function vizOpts() {
 function redrawStage() {
   if (!state.report) return;
   const idx = state.playing ? state.cursor : null;
-  renderStage($("stage"), state.report, state.report.controllers, idx, vizOpts());
+  if (!stageRefs) {
+    stageRefs = buildStage($("stage"), state.report, state.report.controllers, vizOpts());
+  } else {
+    updateStage($("stage"), state.report, stageRefs, idx, vizOpts());
+  }
 }
 
 function buildVizControls(cat) {
@@ -254,7 +271,7 @@ function firstResult() {
 function renderAll() {
   if (!state.report || !Array.isArray(state.report.controllers)) return;
   const r = state.report;
-  renderStage($("stage"), r, r.controllers, null, vizOpts());
+  stageRefs = buildStage($("stage"), r, r.controllers, vizOpts());
   const snnName = r.controllers.find((n) => r.results[n].spiking);
   drawRaster($("raster"), snnName ? r.results[snnName] : null, null);
   renderCharts();
@@ -322,16 +339,21 @@ function togglePlay() {
 }
 
 function tick(now) {
-  const ref = firstResult();
-  if (state.playing && ref) {
-    const T = ref.t.length;
-    const elapsed = (now - state.startTime) / 1000;
-    state.cursor = Math.floor(elapsed / state.report.dt);
-    if (state.cursor >= T) {
-      state.cursor = 0;
-      state.startTime = now;
+  try {
+    const ref = firstResult();
+    if (state.playing && ref) {
+      const T = ref.t.length;
+      const elapsed = (now - state.startTime) / 1000;
+      state.cursor = Math.floor(elapsed / state.report.dt);
+      if (state.cursor >= T) {
+        state.cursor = 0;
+        state.startTime = now;
+      }
+      paintCursor();
     }
-    paintCursor();
+  } catch (err) {
+    // never let a render error kill the animation loop
+    console.error("tick error:", err);
   }
   requestAnimationFrame(tick);
 }
@@ -342,11 +364,11 @@ function paintCursor() {
   const ref = firstResult();
   const t = ref ? ref.t[Math.min(state.cursor, ref.t.length - 1)] : 0;
   $("clock").textContent = `t = ${t.toFixed(2)} s`;
-  // Throttle the heavy 3-D/2-D redraws (~20 fps) so dragging/rotating the scene
-  // stays responsive during playback.
+  // Throttle the heavy redraws (~20 fps). Plotly.restyle never touches the
+  // layout, so the user can rotate the scene live while it plays.
   const now = performance.now();
   if (now - state.lastStageMs > 45) {
-    renderStage($("stage"), r, r.controllers, state.cursor, vizOpts());
+    updateStage($("stage"), r, stageRefs, state.cursor, vizOpts());
     const snnName = r.controllers.find((n) => r.results[n].spiking);
     drawRaster($("raster"), snnName ? r.results[snnName] : null, state.cursor);
     const cx = ref ? ref.t[Math.min(state.cursor, ref.t.length - 1)] : null;

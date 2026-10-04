@@ -1,7 +1,8 @@
 import Plotly from "plotly.js-dist-min";
 import { colorOf, SHORT, DEFAULT_GOAL } from "./runparams.js";
 
-// Set the initial 3-D camera only once; later updates keep the user's rotation.
+// Set the initial 3-D camera only once. Per-frame updates use Plotly.restyle and
+// never touch the layout, so the user's rotation can never be reset.
 let cameraInitialized = false;
 
 function boxTrace(o) {
@@ -69,7 +70,7 @@ function rotFromRpy([roll, pitch, yaw]) {
   ];
 }
 
-function apply(R, v) {
+function applyR(R, v) {
   return [
     R[0][0] * v[0] + R[0][1] * v[1] + R[0][2] * v[2],
     R[1][0] * v[0] + R[1][1] * v[1] + R[1][2] * v[2],
@@ -77,160 +78,170 @@ function apply(R, v) {
   ];
 }
 
-function add3(a, b) { return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]; }
-
-function droneTraces(color, pos, rpy, scale, name) {
-  const R = rotFromRpy(rpy);
+function droneArrays(pos, rpy, scale) {
+  const R = rotFromRpy(rpy || [0, 0, 0]);
   const a = 0.11 * scale;
   const rotors = [ [a, a, 0], [-a, a, 0], [-a, -a, 0], [a, -a, 0] ];
   const X = [], Y = [], Z = [];
-  const pushSegment = (v0, v1) => {
-    const p0 = add3(pos, apply(R, v0));
-    const p1 = add3(pos, apply(R, v1));
-    X.push(p0[0], p1[0], null);
-    Y.push(p0[1], p1[1], null);
-    Z.push(p0[2], p1[2], null);
+  const seg = (v0, v1) => {
+    const p0 = applyR(R, v0), p1 = applyR(R, v1);
+    X.push(pos[0] + p0[0], pos[0] + p1[0], null);
+    Y.push(pos[1] + p0[1], pos[1] + p1[1], null);
+    Z.push(pos[2] + p0[2], pos[2] + p1[2], null);
   };
-  for (const r of rotors) pushSegment([0, 0, 0], r);           // arms
-  pushSegment([0, 0, 0], [0.28 * scale, 0, 0]);                // heading
-  pushSegment([0, 0, 0], [0.18 * scale, 0, 0]);                // body x
-  pushSegment([0, 0, 0], [0, 0.18 * scale, 0]);                // body y
-  pushSegment([0, 0, 0], [0, 0, 0.16 * scale]);                // body z
-
+  for (const r of rotors) seg([0, 0, 0], r);
+  seg([0, 0, 0], [0.28 * scale, 0, 0]);   // heading
+  seg([0, 0, 0], [0.18 * scale, 0, 0]);   // body x
+  seg([0, 0, 0], [0, 0.18 * scale, 0]);   // body y
+  seg([0, 0, 0], [0, 0, 0.16 * scale]);   // body z
   const rx = [], ry = [], rz = [];
   for (const r of rotors) {
-    const p = add3(pos, apply(R, r));
-    rx.push(p[0]); ry.push(p[1]); rz.push(p[2]);
+    const p = applyR(R, r);
+    rx.push(pos[0] + p[0]); ry.push(pos[1] + p[1]); rz.push(pos[2] + p[2]);
   }
-  return [
-    {
-      type: "scatter3d", mode: "lines", x: X, y: Y, z: Z,
-      line: { color, width: 4 }, name: `${SHORT[name] || name} body`,
-      showlegend: false, hoverinfo: "skip",
-    },
-    {
-      type: "scatter3d", mode: "markers", x: rx, y: ry, z: rz,
-      marker: { color, size: 3, symbol: "circle" },
-      name: `${SHORT[name] || name} rotors`, showlegend: false, hoverinfo: "skip",
-    },
-  ];
+  return { x: X, y: Y, z: Z, rx, ry, rz };
 }
 
-function scanTraces(color, pos, angles, ranges, rMax, name) {
-  if (!angles || !ranges) return [];
-  const X = [], Y = [], Z = [];
-  const hx = [], hy = [], hz = [];
+function scanArrays(pos, angles, ranges, rMax) {
+  const X = [], Y = [], Z = [], hx = [], hy = [], hz = [];
+  if (!angles || !ranges) return { x: X, y: Y, z: Z, hx, hy, hz };
   for (let i = 0; i < angles.length; i++) {
     const r = ranges[i];
     if (!(r > 0)) continue;
     const a = angles[i];
-    const p = [pos[0] + r * Math.cos(a), pos[1] + r * Math.sin(a), pos[2]];
-    X.push(pos[0], p[0], null);
-    Y.push(pos[1], p[1], null);
-    Z.push(pos[2], p[2], null);
-    if (r < 0.999 * rMax) { hx.push(p[0]); hy.push(p[1]); hz.push(p[2]); }
+    const px = pos[0] + r * Math.cos(a), py = pos[1] + r * Math.sin(a);
+    X.push(pos[0], px, null);
+    Y.push(pos[1], py, null);
+    Z.push(pos[2], pos[2], null);
+    if (r < 0.999 * rMax) { hx.push(px); hy.push(py); hz.push(pos[2]); }
   }
-  const out = [{
-    type: "scatter3d", mode: "lines", x: X, y: Y, z: Z,
-    line: { color, width: 1 }, opacity: 0.5,
-    name: `scan (${SHORT[name] || name})`, showlegend: false, hoverinfo: "skip",
-  }];
-  if (hx.length) {
-    out.push({
-      type: "scatter3d", mode: "markers", x: hx, y: hy, z: hz,
-      marker: { color, size: 2 }, name: "returns", showlegend: false, hoverinfo: "skip",
-    });
-  }
-  return out;
+  return { x: X, y: Y, z: Z, hx, hy, hz };
 }
 
-export function renderStage(div, report, selection, markerIdx = null, opts = {}) {
-  const traces = [];
+function emptyLine(width, color) {
+  return { type: "scatter3d", mode: "lines", x: [], y: [], z: [],
+    line: { color, width }, showlegend: false, hoverinfo: "skip" };
+}
+
+function emptyMarkers(color, size) {
+  return { type: "scatter3d", mode: "markers", x: [], y: [], z: [],
+    marker: { color, size }, showlegend: false, hoverinfo: "skip" };
+}
+
+function sceneLayout(div, opts = {}) {
+  const scene = {
+    xaxis: { title: "x", gridcolor: "#22303c", zerolinecolor: "#22303c", range: [-2.6, 2.6] },
+    yaxis: { title: "y", gridcolor: "#22303c", zerolinecolor: "#22303c", range: [-2.6, 2.6] },
+    zaxis: { title: "z", gridcolor: "#22303c", zerolinecolor: "#22303c", range: [0, 3.2] },
+    aspectmode: "manual",
+    aspectratio: { x: 1, y: 1, z: 1.1 },
+    bgcolor: "rgba(0,0,0,0)",
+  };
+  // Carry the user's current camera into a rebuild (selection/scene/goal change),
+  // so toggling a controller never resets the view. Falls back to the default eye
+  // on the very first build.
+  let cam = null;
+  try {
+    const live = div && div._fullLayout && div._fullLayout.scene && div._fullLayout.scene.camera;
+    if (live && live.eye && live.eye.x != null) {
+      cam = {
+        eye: { x: live.eye.x, y: live.eye.y, z: live.eye.z },
+        center: live.center ? { x: live.center.x, y: live.center.y, z: live.center.z } : { x: 0, y: 0, z: 0 },
+        up: live.up ? { x: live.up.x, y: live.up.y, z: live.up.z } : { x: 0, y: 0, z: 1 },
+      };
+    }
+  } catch (err) {
+    cam = null;
+  }
+  if (!cam && opts.camera && opts.camera.eye) cam = opts.camera;
+  if (!cam && !cameraInitialized) cam = { eye: { x: 1.5, y: -1.6, z: 0.9 }, up: { x: 0, y: 0, z: 1 } };
+  if (cam) scene.camera = cam;
+  cameraInitialized = true;
+  return scene;
+}
+
+// Build the full trace set once (per report/selection). Returns index bookkeeping
+// used by updateStage to push per-frame data via Plotly.restyle.
+export function buildStage(div, report, selection, opts = {}) {
   const scene = report.scene || {};
   const goal = report.goal || scene.goal || [0, 0, 0];
-  const scale = opts.droneScale || 1;
-
-  for (const name of selection) {
-    const res = report.results[name];
-    if (!res) continue;
-    const traj = res.trajectory;
-    const x = traj.map((p) => p[0]);
-    const y = traj.map((p) => p[1]);
-    const z = traj.map((p) => p[2]);
-    traces.push({
-      type: "scatter3d", mode: "lines", x, y, z,
-      name: SHORT[name] || name,
-      line: { color: colorOf(name), width: 4 },
-      opacity: 0.85, hoverinfo: "name",
-    });
-    const i = markerIdx == null ? traj.length - 1 : Math.min(markerIdx, traj.length - 1);
-    const p = traj[i] || [0, 0, 0];
-    traces.push({
-      type: "scatter3d", mode: "markers", x: [p[0]], y: [p[1]], z: [p[2]],
-      marker: { color: colorOf(name), size: 4 }, showlegend: false, hoverinfo: "name",
-    });
-
-    if (opts.showDrone && res.attitude && res.attitude[i]) {
-      traces.push(...droneTraces(colorOf(name), p, res.attitude[i], scale, name));
-    }
-  }
-
-  if (opts.showScan) {
-    for (const brain of opts.scanBrains || []) {
-      const res = report.results[brain];
-      if (!res || !res.scan || !res.scan_angles) continue;
-      const i = markerIdx == null ? res.scan.length - 1 : Math.min(markerIdx, res.scan.length - 1);
-      const pos = res.trajectory[i] || [0, 0, 0];
-      const rMax = Math.max(...res.scan[i].map((v) => (v == null ? 0 : v)), 1e-6);
-      traces.push(...scanTraces(colorOf(brain), pos, res.scan_angles, res.scan[i], rMax, brain));
-    }
-  }
-
-  traces.push({
-    type: "scatter3d", mode: "markers",
-    x: [goal[0]], y: [goal[1]], z: [goal[2]],
-    marker: { color: "#22c55e", size: 4, symbol: "diamond" },
-    name: "GOAL", hoverinfo: "name",
-  });
-
-  // faint marker for the shipped goal when a different interactive goal is active
-  if (
-    Math.abs(goal[0] - DEFAULT_GOAL[0]) +
-    Math.abs(goal[1] - DEFAULT_GOAL[1]) +
-    Math.abs(goal[2] - DEFAULT_GOAL[2]) > 1e-6
-  ) {
-    traces.push({
-      type: "scatter3d", mode: "markers",
-      x: [DEFAULT_GOAL[0]], y: [DEFAULT_GOAL[1]], z: [DEFAULT_GOAL[2]],
-      marker: { color: "#22c55e", size: 2, symbol: "circle-open" },
-      opacity: 0.4, name: "shipped goal", hoverinfo: "name",
-    });
-  }
+  const traces = [];
+  const refs = { ctrl: {}, scan: {} };
 
   const obstacles = scene.obstacles || [];
   if (obstacles.length) {
     for (const o of obstacles) {
       if (o.kind === "cylinder") {
         const h = o.height || 2.8, z0 = o.z0 || 0;
-        traces.push({
-          type: "scatter3d", mode: "lines",
+        traces.push({ type: "scatter3d", mode: "lines",
           x: [o.center[0], o.center[0]], y: [o.center[1], o.center[1]], z: [z0, z0 + h],
-          line: { color: "#c98a2b", width: 10 }, showlegend: false,
-          name: "obstacle", hoverinfo: "skip",
-        });
+          line: { color: "#c98a2b", width: 10 }, showlegend: false, name: "obstacle", hoverinfo: "skip" });
       } else {
         traces.push(boxTrace(o), boxEdges(o));
       }
     }
   } else if (scene.obstacle) {
     const h = scene.obstacle_height || 2.8;
-    traces.push({
-      type: "scatter3d", mode: "lines",
-      x: [scene.obstacle[0], scene.obstacle[0]],
-      y: [scene.obstacle[1], scene.obstacle[1]], z: [0, h],
-      line: { color: "#c98a2b", width: 10 }, showlegend: false,
-      name: "obstacle", hoverinfo: "skip",
-    });
+    traces.push({ type: "scatter3d", mode: "lines",
+      x: [scene.obstacle[0], scene.obstacle[0]], y: [scene.obstacle[1], scene.obstacle[1]], z: [0, h],
+      line: { color: "#c98a2b", width: 10 }, showlegend: false, name: "obstacle", hoverinfo: "skip" });
+  }
+
+  traces.push({ type: "scatter3d", mode: "markers",
+    x: [goal[0]], y: [goal[1]], z: [goal[2]],
+    marker: { color: "#22c55e", size: 4, symbol: "diamond" }, name: "GOAL", hoverinfo: "name" });
+  if (Math.abs(goal[0] - DEFAULT_GOAL[0]) + Math.abs(goal[1] - DEFAULT_GOAL[1]) + Math.abs(goal[2] - DEFAULT_GOAL[2]) > 1e-6) {
+    traces.push({ type: "scatter3d", mode: "markers",
+      x: [DEFAULT_GOAL[0]], y: [DEFAULT_GOAL[1]], z: [DEFAULT_GOAL[2]],
+      marker: { color: "#22c55e", size: 2, symbol: "circle-open" },
+      opacity: 0.4, name: "shipped goal", hoverinfo: "name" });
+  }
+
+  for (const name of report.controllers) {
+    const res = report.results[name];
+    traces.push({ type: "scatter3d", mode: "lines",
+      x: res.trajectory.map((p) => p[0]), y: res.trajectory.map((p) => p[1]),
+      z: res.trajectory.map((p) => p[2]),
+      name: SHORT[name] || name, line: { color: colorOf(name), width: 4 }, opacity: 0.85, hoverinfo: "name" });
+    const last = Math.max(0, res.trajectory.length - 1);
+    const pos = res.trajectory[last] || [0, 0, 0];
+    const d = droneArrays(pos, res.attitude ? res.attitude[last] : [0, 0, 0], opts.droneScale || 1);
+    refs.ctrl[name] = {
+      marker: traces.length,
+      droneLines: traces.length + 1,
+      droneMarkers: traces.length + 2,
+    };
+    traces.push(
+      { type: "scatter3d", mode: "markers", x: [pos[0]], y: [pos[1]], z: [pos[2]],
+        marker: { color: colorOf(name), size: 4 }, showlegend: false, hoverinfo: "skip" },
+      { type: "scatter3d", mode: "lines", x: d.x, y: d.y, z: d.z,
+        line: { color: colorOf(name), width: 4 }, showlegend: false, hoverinfo: "skip",
+        visible: !!opts.showDrone },
+      { type: "scatter3d", mode: "markers", x: d.rx, y: d.ry, z: d.rz,
+        marker: { color: colorOf(name), size: 3 }, showlegend: false, hoverinfo: "skip",
+        visible: !!opts.showDrone },
+    );
+  }
+  for (const name of report.controllers) {
+    const res = report.results[name];
+    if (!res.scan) continue;
+    const on = !!opts.showScan && (opts.scanBrains || []).includes(name);
+    let s = { x: [], y: [], z: [], hx: [], hy: [], hz: [] };
+    const i = Math.max(0, res.scan.length - 1);
+    if (on) {
+      const pos = res.trajectory[i] || [0, 0, 0];
+      const rMax = Math.max(...res.scan[i].map((v) => (v == null ? 0 : v)), 1e-6);
+      s = scanArrays(pos, res.scan_angles, res.scan[i], rMax);
+    }
+    refs.scan[name] = { rays: traces.length, hits: traces.length + 1 };
+    traces.push(
+      { type: "scatter3d", mode: "lines", x: s.x, y: s.y, z: s.z,
+        line: { color: colorOf(name), width: 1 }, opacity: 0.5,
+        showlegend: false, hoverinfo: "skip", visible: on },
+      { type: "scatter3d", mode: "markers", x: s.hx, y: s.hy, z: s.hz,
+        marker: { color: colorOf(name), size: 2 }, showlegend: false, hoverinfo: "skip",
+        visible: on },
+    );
   }
 
   const layout = {
@@ -239,18 +250,52 @@ export function renderStage(div, report, selection, markerIdx = null, opts = {})
     font: { color: "#c9d1d9", size: 10 },
     showlegend: true,
     legend: { orientation: "h", y: 0.02, x: 0.02, font: { size: 9 } },
-    // keep the user's camera/zoom across Plotly.react updates
     uirevision: "keep",
-    scene: {
-      xaxis: { title: "x", gridcolor: "#22303c", zerolinecolor: "#22303c", range: [-2.6, 2.6] },
-      yaxis: { title: "y", gridcolor: "#22303c", zerolinecolor: "#22303c", range: [-2.6, 2.6] },
-      zaxis: { title: "z", gridcolor: "#22303c", zerolinecolor: "#22303c", range: [0, 3.2] },
-      aspectmode: "manual",
-      aspectratio: { x: 1, y: 1, z: 1.1 },
-      camera: cameraInitialized ? undefined : { eye: { x: 1.5, y: -1.6, z: 0.9 } },
-      bgcolor: "rgba(0,0,0,0)",
-    },
+    scene: sceneLayout(div, opts),
   };
-  Plotly.react(div, traces, layout, { displayModeBar: false, responsive: true });
-  cameraInitialized = true;
+  Promise.resolve(Plotly.react(div, traces, layout, { displayModeBar: false, responsive: true }))
+    .then(() => updateStage(div, report, refs, null, opts));
+  refs.selection = selection;
+  return refs;
+}
+
+// Per-frame update: only trace data/visibility changes; the layout (camera) is
+// never touched, so rotating the scene while it plays is preserved.
+export function updateStage(div, report, refs, markerIdx, opts = {}) {
+  if (!refs) return;
+  const indices = [];
+  const X = [], Y = [], Z = [], VIS = [];
+  const add = (index, xs, ys, zs, visible) => {
+    indices.push(index);
+    X.push(xs); Y.push(ys); Z.push(zs); VIS.push(visible);
+  };
+
+  for (const name of Object.keys(refs.ctrl)) {
+    const res = report.results[name];
+    if (!res) continue;
+    const T = res.trajectory.length;
+    const i = markerIdx == null ? T - 1 : Math.min(markerIdx, T - 1);
+    const pos = res.trajectory[i] || [0, 0, 0];
+    add(refs.ctrl[name].marker, [pos[0]], [pos[1]], [pos[2]], true);
+    const d = droneArrays(pos, res.attitude ? res.attitude[i] : [0, 0, 0], opts.droneScale || 1);
+    add(refs.ctrl[name].droneLines, d.x, d.y, d.z, !!opts.showDrone);
+    add(refs.ctrl[name].droneMarkers, d.rx, d.ry, d.rz, !!opts.showDrone);
+  }
+  for (const name of Object.keys(refs.scan)) {
+    const res = report.results[name];
+    const on = !!opts.showScan && (opts.scanBrains || []).includes(name);
+    if (on) {
+      const i = markerIdx == null ? res.scan.length - 1 : Math.min(markerIdx, res.scan.length - 1);
+      const pos = res.trajectory[i] || [0, 0, 0];
+      const rMax = Math.max(...res.scan[i].map((v) => (v == null ? 0 : v)), 1e-6);
+      const s = scanArrays(pos, res.scan_angles, res.scan[i], rMax);
+      add(refs.scan[name].rays, s.x, s.y, s.z, true);
+      add(refs.scan[name].hits, s.hx, s.hy, s.hz, true);
+    } else {
+      add(refs.scan[name].rays, [], [], [], false);
+      add(refs.scan[name].hits, [], [], [], false);
+    }
+  }
+  // One update object, one value per listed trace (Plotly restyle convention).
+  Plotly.restyle(div, { x: X, y: Y, z: Z, visible: VIS }, indices);
 }
