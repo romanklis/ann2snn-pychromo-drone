@@ -14,6 +14,11 @@ const state = {
   startTime: 0,
   goal: readGoal(),
   scene: readScene(),
+  showDrone: true,
+  showScan: true,
+  scanMode: "all",
+  sensorBrains: [],
+  lastStageMs: 0,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -24,6 +29,7 @@ async function boot() {
     renderBadges(health, cat);
     buildPicker(cat);
     buildSceneSelect(cat.scenes);
+    buildVizControls(cat);
   } catch (err) {
     $("badges").textContent = `server error: ${err.message}`;
     return;
@@ -103,7 +109,7 @@ async function applyGoal(goal) {
   // while the (seconds-long) re-run is in flight.
   if (state.report && Array.isArray(state.report.controllers)) {
     state.report.goal = goal || DEFAULT_GOAL;
-    renderStage($("stage"), state.report, state.report.controllers, null);
+    renderStage($("stage"), state.report, state.report.controllers, null, vizOpts());
   }
   return refresh();
 }
@@ -168,6 +174,43 @@ function renderBadges(health, cat) {
   $("badges").innerHTML = bits.join("");
 }
 
+function vizOpts() {
+  let scanBrains = [];
+  if (state.showScan) {
+    if (state.scanMode === "all") scanBrains = [...state.sensorBrains];
+    else if (state.scanMode !== "off") scanBrains = [state.scanMode];
+  }
+  return { showDrone: state.showDrone, showScan: state.showScan, scanBrains };
+}
+
+function redrawStage() {
+  if (!state.report) return;
+  const idx = state.playing ? state.cursor : null;
+  renderStage($("stage"), state.report, state.report.controllers, idx, vizOpts());
+}
+
+function buildVizControls(cat) {
+  state.sensorBrains = (cat.catalogue || []).filter((c) => c.recurrent).map((c) => c.name);
+  const sel = $("scan-brain");
+  const options = [["off", "off"], ["all", "all"],
+    ...state.sensorBrains.map((n) => [n, SHORT[n] || n])];
+  sel.innerHTML = options.map(([v, label]) => `<option value="${v}">${label}</option>`).join("");
+  if (!["off", "all", ...state.sensorBrains].includes(state.scanMode)) state.scanMode = "all";
+  sel.value = state.scanMode;
+  $("show-drone").addEventListener("change", () => {
+    state.showDrone = $("show-drone").checked;
+    redrawStage();
+  });
+  $("show-scan").addEventListener("change", () => {
+    state.showScan = $("show-scan").checked;
+    redrawStage();
+  });
+  sel.addEventListener("change", () => {
+    state.scanMode = sel.value;
+    redrawStage();
+  });
+}
+
 function buildSceneSelect(scenes) {
   const sel = $("scene");
   const names = Array.isArray(scenes) && scenes.length ? scenes : ["pillar"];
@@ -211,7 +254,7 @@ function firstResult() {
 function renderAll() {
   if (!state.report || !Array.isArray(state.report.controllers)) return;
   const r = state.report;
-  renderStage($("stage"), r, r.controllers, null);
+  renderStage($("stage"), r, r.controllers, null, vizOpts());
   const snnName = r.controllers.find((n) => r.results[n].spiking);
   drawRaster($("raster"), snnName ? r.results[snnName] : null, null);
   renderCharts();
@@ -299,11 +342,17 @@ function paintCursor() {
   const ref = firstResult();
   const t = ref ? ref.t[Math.min(state.cursor, ref.t.length - 1)] : 0;
   $("clock").textContent = `t = ${t.toFixed(2)} s`;
-  renderStage($("stage"), r, r.controllers, state.cursor);
-  const snnName = r.controllers.find((n) => r.results[n].spiking);
-  drawRaster($("raster"), snnName ? r.results[snnName] : null, state.cursor);
-  const cx = ref ? ref.t[Math.min(state.cursor, ref.t.length - 1)] : null;
-  for (const id of ["ctrl-chart", "track-chart", "clear-chart"]) setCursor($(id), cx);
+  // Throttle the heavy 3-D/2-D redraws (~20 fps) so dragging/rotating the scene
+  // stays responsive during playback.
+  const now = performance.now();
+  if (now - state.lastStageMs > 45) {
+    renderStage($("stage"), r, r.controllers, state.cursor, vizOpts());
+    const snnName = r.controllers.find((n) => r.results[n].spiking);
+    drawRaster($("raster"), snnName ? r.results[snnName] : null, state.cursor);
+    const cx = ref ? ref.t[Math.min(state.cursor, ref.t.length - 1)] : null;
+    for (const id of ["ctrl-chart", "track-chart", "clear-chart"]) setCursor($(id), cx);
+    state.lastStageMs = now;
+  }
 }
 
 boot();

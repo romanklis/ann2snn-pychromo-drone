@@ -171,6 +171,16 @@ def run_controller(
             if frame is not None:
                 spikes[i, : len(frame)] = frame
 
+    scan = None
+    frames = history["scan"]
+    if any(s is not None for s in frames):
+        k = len(next(s for s in frames if s is not None))
+        scan = np.full((len(frames), k), np.nan, dtype=np.float64)
+        for i, frame in enumerate(frames):
+            if frame is not None:
+                scan[i] = frame
+    angles = getattr(controller, "scan_angles", None)
+
     label = dict(CONTROLLERS).get(name, name)
     return {
         "controller": name,
@@ -187,6 +197,8 @@ def run_controller(
         "success": [bool(v) for v in (scene.clearance_series(state) >= 0.0)],
         "telemetry": _telemetry_matrix(history),
         "spikes": None if spikes is None else spikes.tolist(),
+        "scan": None if scan is None else np.round(scan, 3).tolist(),
+        "scan_angles": None if (scan is None or angles is None) else [float(a) for a in angles],
         "metrics": metrics,
     }
 

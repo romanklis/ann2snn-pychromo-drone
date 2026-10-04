@@ -115,6 +115,16 @@ def test_missing_weights_marks_ann_snn_unavailable(tmp_path):
     assert "ds_guidance" in report["results"]
 
 
+@pytest.mark.skipif(not _HAS_WEIGHTS, reason="connectome weights bundle not present")
+def test_scan_is_recorded_for_sensor_brains():
+    report = run_benchmark(["ds_guidance", "snn"], steps=20)
+    assert report["results"]["ds_guidance"]["scan"] is None       # teacher is oracle
+    scan = report["results"]["snn"]["scan"]
+    assert len(scan) == 21 and len(scan[0]) == 32                 # T x k
+    assert report["results"]["snn"]["scan_angles"] is not None
+    json.dumps(report, allow_nan=False)
+
+
 def test_available_controllers_reports_reasons():
     avail = available_controllers()
     assert avail["ds_guidance"]["available"] is True

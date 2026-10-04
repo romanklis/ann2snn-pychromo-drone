@@ -17,7 +17,7 @@ import numpy as np
 
 from .geometry import ray_cast
 
-__all__ = ["SensorConfig", "scan", "sensor_features", "SENSOR_CUE_DIM"]
+__all__ = ["SensorConfig", "scan", "scan_cues", "sensor_features", "SENSOR_CUE_DIM"]
 
 _EPS = 1e-9
 
@@ -70,6 +70,21 @@ def scan(
     return np.clip(ranges, 0.0, config.r_max)
 
 
+def scan_cues(ranges: np.ndarray, config: SensorConfig) -> np.ndarray:
+    """``(5,)`` cues from a range profile: min range, bearing (2), slope, curvature."""
+    angles = config.angles()
+    k = int(config.k)
+    r = np.asarray(ranges, dtype=np.float64)
+    idx = int(np.argmin(r))
+    min_range = float(r[idx]) / config.r_max
+    bearing = np.array([np.cos(angles[idx]), np.sin(angles[idx])], dtype=np.float64)
+    delta = 2.0 * np.pi / max(k, 1)
+    i0, i1 = (idx - 1) % k, (idx + 1) % k
+    slope = float(r[i1] - r[i0]) / (2.0 * delta * config.r_max)
+    curvature = abs(float(r[i0]) - 2.0 * float(r[idx]) + float(r[i1])) / config.r_max
+    return np.array([min_range, bearing[0], bearing[1], slope, curvature], dtype=np.float64)
+
+
 def sensor_features(
     position,
     obstacles: Sequence,
@@ -77,19 +92,5 @@ def sensor_features(
     rng: Optional[np.random.Generator] = None,
 ) -> np.ndarray:
     """``(k + 5,)`` policy features: normalized ranges + min/bearing/slope/curvature."""
-    angles = config.angles()
-    k = int(config.k)
     ranges = scan(obstacles, position, config, rng)
-    r_norm = ranges / config.r_max
-
-    idx = int(np.argmin(ranges))
-    min_range = float(ranges[idx]) / config.r_max
-    bearing = np.array([np.cos(angles[idx]), np.sin(angles[idx])], dtype=np.float64)
-
-    delta = 2.0 * np.pi / max(k, 1)
-    i0, i1 = (idx - 1) % k, (idx + 1) % k
-    slope = float(ranges[i1] - ranges[i0]) / (2.0 * delta * config.r_max)
-    curvature = abs(float(ranges[i0]) - 2.0 * float(ranges[idx]) + float(ranges[i1])) / config.r_max
-
-    cues = np.array([min_range, bearing[0], bearing[1], slope, curvature], dtype=np.float64)
-    return np.concatenate([r_norm, cues])
+    return np.concatenate([ranges / config.r_max, scan_cues(ranges, config)])

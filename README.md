@@ -100,9 +100,14 @@ then a slim Python runtime serves it) and runs it on `http://localhost:8080`.
   `POST /api/simulate` (`{controller, steps?, seed?, goal?}`),
   `POST /api/benchmark` (`{controllers?, steps?, seed?, goal?}` → per-controller
   traces, telemetry, spike events, metrics, and `stats` with the SNN−ANN deltas).
-- **Hero page** (`/`): Plotly 3-D trajectories (goal + pillar), spike raster,
-  control-output and tracking/clearance charts, a metrics/result bar, and a
-  shared play cursor.
+- **Hero page** (`/`): Plotly 3-D trajectories (goal + pillar/boxes), an **oriented
+  drone** per brain (body cross + rotors + body-frame triad, from the recorded
+  attitude) and the **LiDAR rays/returns** for the selected sensor brain, a spike
+  raster, control-output and tracking/clearance charts, a metrics/result bar, and a
+  shared play cursor. Header toggles: `drone`, `scan`, and a `rays for`
+  dropdown (`off` / `all` / per brain). The camera/zoom persist while the
+  animation plays (rotate the scene mid-play), and obstacles are drawn as
+  see-through boxes with an edge outline.
 - **Extended page** (`/extended`): multi-lane traces (position, velocity,
   attitude, tracking error, command, telemetry), a frame readout, and
   metrics/weights tables.

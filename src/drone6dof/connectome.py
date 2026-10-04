@@ -23,7 +23,7 @@ from typing import Dict, Optional
 
 import numpy as np
 
-from .policy import ReferenceAccelEstimator, policy_input
+from .policy import ReferenceAccelEstimator, policy_input_with_scan
 from .sensor import SensorConfig
 from .task import ObstacleGoalTask
 
@@ -215,6 +215,7 @@ class ConnectomeController:
         self.estimator = ReferenceAccelEstimator(dt=self.dt, plant_gain=1.0, pos_dim=3)
         self.sensor = sensor or SensorConfig()
         self._rng = np.random.default_rng(self.sensor.seed)
+        self._last_scan = None
 
         edges = np.asarray(bundle["edges"], dtype=np.int64)
         polarity = np.asarray(bundle["polarity"], dtype=np.float64)
@@ -240,16 +241,18 @@ class ConnectomeController:
         self.estimator.reset()
         self._rng = np.random.default_rng(self.sensor.seed)
         self._last = {}
+        self._last_scan = None
 
     def act(self, state: np.ndarray, ref) -> np.ndarray:
         scene = (getattr(ref, "meta", None) or {}).get("scene")
         if scene is None:
             raise ValueError("the connectome controller needs ref.meta['scene']")
-        x = policy_input(
+        features, ranges = policy_input_with_scan(
             state, ref, scene, self.estimator, self.task,
             sensor=self.sensor, rng=self._rng, pos_dim=3,
         )
-        u = self.net.forward_input(x)
+        self._last_scan = ranges
+        u = self.net.forward_input(features)
         if self.kind == "ann":
             self._last = dict(self.net.last_telemetry)
         else:
@@ -264,3 +267,12 @@ class ConnectomeController:
     def last_spikes(self):
         """Per-neuron spike vector of the last frame (SNN), else ``None``."""
         return getattr(self.net, "last_spikes", None)
+
+    @property
+    def last_scan(self):
+        """Raw LiDAR range profile of the last frame (or ``None`` before acting)."""
+        return self._last_scan
+
+    @property
+    def scan_angles(self):
+        return self.sensor.angles()

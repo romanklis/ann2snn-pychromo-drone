@@ -19,12 +19,13 @@ from typing import Optional
 import numpy as np
 
 from .params import DT
-from .sensor import SensorConfig, sensor_features
+from .sensor import SensorConfig, scan, scan_cues
 
 __all__ = [
     "error_vector",
     "ReferenceAccelEstimator",
     "policy_input",
+    "policy_input_with_scan",
     "policy_input_dim",
 ]
 
@@ -76,6 +77,28 @@ def policy_input_dim(sensor: SensorConfig, pos_dim: int = 3) -> int:
     return 3 * int(pos_dim) + int(sensor.input_dim)
 
 
+def policy_input_with_scan(
+    state: np.ndarray,
+    ref,
+    scene,
+    estimator: ReferenceAccelEstimator,
+    task=None,
+    *,
+    sensor: Optional[SensorConfig] = None,
+    rng: Optional[np.random.Generator] = None,
+    pos_dim: int = 3,
+):
+    """As :func:`policy_input` but also returns the raw range profile (for viz)."""
+    sensor = sensor or SensorConfig()
+    d = int(pos_dim)
+    state = np.asarray(state, dtype=np.float64).reshape(-1)
+    err = error_vector(state, ref, d)
+    u_ff = estimator.update(state, ref)
+    ranges = scan(getattr(scene, "obstacles", ()), state[:2], sensor, rng)
+    feats = np.concatenate([ranges / sensor.r_max, scan_cues(ranges, sensor)])
+    return np.concatenate([err, u_ff, feats]).astype(np.float64), ranges
+
+
 def policy_input(
     state: np.ndarray,
     ref,
@@ -88,10 +111,8 @@ def policy_input(
     pos_dim: int = 3,
 ) -> np.ndarray:
     """Assemble the sensor-conditioned policy input for one frame."""
-    sensor = sensor or SensorConfig()
-    d = int(pos_dim)
-    state = np.asarray(state, dtype=np.float64).reshape(-1)
-    err = error_vector(state, ref, d)
-    u_ff = estimator.update(state, ref)
-    scan_feats = sensor_features(state[:2], getattr(scene, "obstacles", ()), sensor, rng)
-    return np.concatenate([err, u_ff, scan_feats]).astype(np.float64)
+    features, _ = policy_input_with_scan(
+        state, ref, scene, estimator, task,
+        sensor=sensor, rng=rng, pos_dim=pos_dim,
+    )
+    return features

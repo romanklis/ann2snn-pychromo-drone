@@ -82,6 +82,7 @@ class Simulation:
             "goal_dist": [],
             "clearance": [],
             "spikes": [],        # first 200 neurons per frame, for spiking controllers
+            "scan": [],          # raw LiDAR ranges per frame, for sensor controllers
         }
         self._record(np.zeros(3))
         return self.observe()
@@ -151,6 +152,10 @@ class Simulation:
         self.history["clearance"].append(tele["clearance"])
         self.history["spikes"].append(
             None if spikes is None else np.asarray(spikes, dtype=np.uint8)[:200].copy()
+        )
+        scans = getattr(self.controller, "last_scan", None)
+        self.history["scan"].append(
+            None if scans is None else np.asarray(scans, dtype=np.float32).copy()
         )
 
     def observe(self) -> dict:
