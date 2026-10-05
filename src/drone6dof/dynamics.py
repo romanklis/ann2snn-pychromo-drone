@@ -110,6 +110,18 @@ class NumpyPlantBackend:
         return self.plant.R.copy()
 
     @property
+    def omega(self) -> np.ndarray:
+        return self.plant.omega.copy()
+
+    @property
+    def omega_m(self) -> np.ndarray:
+        return self.plant.omega_m.copy()
+
+    @property
+    def rotor_target(self) -> np.ndarray:
+        return self.plant.last_rotor_target
+
+    @property
     def attitude_rpy(self) -> np.ndarray:
         return self.plant.attitude_rpy
 

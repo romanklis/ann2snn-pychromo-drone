@@ -76,6 +76,7 @@ class Quad6DoF:
         self.tau_att = np.zeros(3)
         self.soc = float(p.soc0)
         self._last: Dict[str, float] = {}
+        self._last_omega_target = np.full(4, float(p.initial_omega_m))
         self.frames = 0
         self.substeps = 0
 
@@ -88,6 +89,11 @@ class Quad6DoF:
     @property
     def last_telemetry(self) -> Dict[str, float]:
         return dict(self._last)
+
+    @property
+    def last_rotor_target(self) -> np.ndarray:
+        """Applied/commanded rotor speeds (rad/s) from the last substep."""
+        return self._last_omega_target.copy()
 
     # ------------------------------------------------------------------- step
     def __call__(
@@ -209,6 +215,7 @@ class Quad6DoF:
                 (targets - p.mixer_center) / p.mixer_scale
             )
             omega_target = np.sqrt(np.maximum(targets, 0.0) / p.C_T)
+            self._last_omega_target = omega_target.copy()
             tau_ff = p.d_m * omega_target + p.C_Q * omega_target ** 2
             i_target = np.clip(
                 (tau_ff + 0.003 * (omega_target - self.omega_m)) / p.K_t,

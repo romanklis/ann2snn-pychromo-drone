@@ -14,6 +14,7 @@ from .geometry import BoxObstacle
 from .params import DT
 from .scene import Scene, SceneSpec
 from .sensor import SensorConfig
+from .sensors import SensorConfig as SensorSuiteConfig
 
 __all__ = [
     "EXAMPLE_NAME",
@@ -27,6 +28,8 @@ __all__ = [
     "DS_TEACHER_KWARGS",
     "GOAL_BOUNDS",
     "SENSOR",
+    "SENSOR_SUITE",
+    "ESTIMATOR",
     "OBSTACLE_LAYOUT",
     "PRESET_SCENES",
     "validate_goal",
@@ -49,6 +52,7 @@ INIT_STATE: Tuple[float, ...] = (-2.2, 0.0, 0.5, 0.0, 0.0, 0.0)
 GOAL_TOLERANCE: float = 0.30
 
 #: Pillar on the start->goal line; radii are the prototype's, radial gain re-tuned.
+#: Margins are widened a little so estimate-noise excursions still clear it.
 QUAD_SCENE = SceneSpec(
     goal=(0.0, 0.0, 2.5),
     obstacle=(-1.0, 0.0, 0.8),
@@ -63,6 +67,12 @@ DS_TEACHER_KWARGS = {"speed_cap": 1.4, "ds_radial_gain": 0.6}
 
 #: LiDAR model for the sensor-conditioned policy (see :mod:`drone6dof.sensor`).
 SENSOR = SensorConfig()
+
+#: Onboard sensor suite for the UKF (see :mod:`drone6dof.sensors`).
+SENSOR_SUITE = SensorSuiteConfig()
+
+#: UKF process-model parameters.
+ESTIMATOR = {"rotor_tau": 0.05, "rotor_omega_max": 1400.0}
 
 #: Obstacle distribution the policy is trained on (randomised box layouts).
 OBSTACLE_LAYOUT = {
@@ -120,7 +130,10 @@ def build_scene(seed: int = 0, goal: Optional[Sequence[float]] = None) -> Scene:
 
 
 def _box(cx, cy, hx, hy, angle=0.0):
-    return BoxObstacle(center=(float(cx), float(cy)), half=(float(hx), float(hy)), angle=float(angle))
+    return BoxObstacle(
+        center=(float(cx), float(cy)), half=(float(hx), float(hy)), angle=float(angle),
+        dead_radius=0.55, influence_radius=1.4,
+    )
 
 
 #: Named benchmark scenes (boxes/cylinders; 2.5D vertical cross-sections).

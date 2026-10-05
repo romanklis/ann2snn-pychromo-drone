@@ -11,10 +11,13 @@ from typing import Callable, Dict, List, Optional
 
 import numpy as np
 
-from .config import CONTROL_LIMIT, DT, GOAL_TOLERANCE, INIT_STATE, PLANT_GAIN, STEPS
+from .config import CONTROL_LIMIT, DT, GOAL_TOLERANCE, INIT_STATE, PLANT_GAIN, SENSOR, STEPS
 from .dynamics import DynamicsBackend
+from .estimator import ErrorStateUKF
+from .params import QuadParams
 from .reference import goal_reference
 from .scene import Scene
+from .sensors import Observation, SensorConfig, SensorSuite
 from .task import ObstacleGoalTask
 
 #: telemetry columns always present in the CSV export, in order
@@ -50,6 +53,9 @@ class Simulation:
         initial_state=INIT_STATE,
         goal_tolerance: float = GOAL_TOLERANCE,
         disturbance: Optional[Callable[[int], Optional[np.ndarray]]] = None,
+        use_estimator: bool = True,
+        estimator=None,
+        sensors=None,
     ) -> None:
         self.backend = backend
         self.controller = controller
@@ -65,6 +71,22 @@ class Simulation:
             steps=self.steps, goal=scene.goal, dt=self.dt, meta={"scene": scene}
         )
         self._disturbance = disturbance
+        # Estimator-in-the-loop: the plant is the hidden truth; controllers only
+        # ever consume the UKF estimate.
+        self.use_estimator = bool(use_estimator)
+        self.sensor_config = SensorConfig()
+        self.sensors = sensors
+        self.estimator = estimator
+        if self.use_estimator:
+            plant = getattr(backend, "plant", None)
+            params = getattr(plant, "p", None) or QuadParams()
+            if self.sensors is None:
+                self.sensors = SensorSuite(
+                    self.sensor_config, lidar=SENSOR,
+                    obstacles=getattr(scene, "obstacles", ()), dt=self.dt,
+                )
+            if self.estimator is None:
+                self.estimator = ErrorStateUKF(params=params, sensor=self.sensor_config, dt=self.dt)
         self.reset()
 
     # -- lifecycle ---------------------------------------------------------- #
@@ -73,6 +95,15 @@ class Simulation:
         reset = getattr(self.controller, "reset", None)
         if callable(reset):
             reset()
+        if self.use_estimator and self.estimator is not None:
+            self.estimator.reset(self.initial_state[:3], self.initial_state[3:6])
+            if self.sensors is not None:
+                self.sensors.reset()
+            self._est_state = self.estimator.state_view()
+            self._gps_ok = True
+        else:
+            self._est_state = self.initial_state.copy()
+            self._gps_ok = True
         self.k = 0
         self.history: Dict[str, list] = {
             "state": [],
@@ -83,6 +114,8 @@ class Simulation:
             "clearance": [],
             "spikes": [],        # first 200 neurons per frame, for spiking controllers
             "scan": [],          # raw LiDAR ranges per frame, for sensor controllers
+            "estimate": [],      # estimated [p, v] per frame
+            "est_error": [],     # true p - estimated p
         }
         self._record(np.zeros(3))
         return self.observe()
@@ -90,7 +123,10 @@ class Simulation:
     # -- stepping ----------------------------------------------------------- #
     def step(self, action: Optional[np.ndarray] = None) -> dict:
         if action is None:
-            action = self.controller.act(self.state, self.reference.at(self.k))
+            # The controller only ever sees the estimate (or the raw initial state
+            # when estimation is disabled), never the hidden truth.
+            obs = Observation(state=self._est_state.copy(), gps_ok=self._gps_ok)
+            action = self.controller.act(obs, self.reference.at(self.k))
         action = np.asarray(action, dtype=np.float64).reshape(3)
         dist = None
         if self._disturbance is not None:
@@ -103,6 +139,25 @@ class Simulation:
             damping=self.damping,
             disturbance=dist,
         )
+        if self.use_estimator and self.estimator is not None and self.sensors is not None:
+            plant = getattr(self.backend, "plant", None)
+            params = getattr(plant, "p", None)
+            p = params if params is not None else QuadParams()
+            truth = {
+                "p": self.backend.position,
+                "v": np.asarray(self.backend.state, dtype=np.float64)[3:6],
+                "R": self.backend.rotation,
+                "omega": self.backend.omega,
+                "omega_m": self.backend.omega_m,
+                "mass": p.m,
+                "C_T": p.C_T,
+            }
+            meas = self.sensors.measure(self.k + 1, truth)
+            rotor_target = getattr(self.backend, "rotor_target", np.full(4, p.hover_omega))
+            self._est_state = self.estimator.step(meas, rotor_target)
+            self._gps_ok = bool(meas.gps_ok)
+        else:
+            self._est_state = np.asarray(self.backend.state, dtype=np.float64).copy()
         self.k += 1
         self._record(action)
         return self.observe()
@@ -157,6 +212,9 @@ class Simulation:
         self.history["scan"].append(
             None if scans is None else np.asarray(scans, dtype=np.float32).copy()
         )
+        est = np.asarray(self._est_state, dtype=np.float64).reshape(-1)
+        self.history["estimate"].append(est.copy())
+        self.history["est_error"].append(state[:3] - est[:3])
 
     def observe(self) -> dict:
         idx = min(self.k, len(self.reference) - 1)
@@ -166,6 +224,7 @@ class Simulation:
             "step": int(self.k),
             "done": bool(self.done),
             "state": self.state.astype(float),
+            "estimate": np.asarray(self._est_state, dtype=float),
             "rpy": np.asarray(
                 getattr(self.backend, "attitude_rpy", np.zeros(3)), dtype=float
             ),
@@ -187,6 +246,12 @@ class Simulation:
         tele = self.history["telemetry"]
         g_forces = [t.get("g_force", float("nan")) for t in tele]
         soc = [t.get("soc_pct", float("nan")) for t in tele]
+        latencies = [t.get("latency_ms") for t in tele if t.get("latency_ms") is not None]
+        rates = [t.get("spike_rate_hz") for t in tele if t.get("spike_rate_hz") is not None]
+        step_dists = np.linalg.norm(np.diff(traj[:, :3], axis=0), axis=1) if len(traj) > 1 else np.zeros(0)
+        cmd = np.asarray(self.history["command"], dtype=np.float64)
+        smooth = (np.linalg.norm(np.diff(cmd, axis=0), axis=1)
+                  if len(cmd) > 1 else np.zeros(0))
         return {
             "controller": getattr(self.controller, "name", "controller"),
             "steps": int(self.k),
@@ -198,6 +263,10 @@ class Simulation:
             "final_goal_dist_m": float(goal_dists[-1]) if len(goal_dists) else float("nan"),
             "closest_goal_dist_m": float(goal_dists.min()) if len(goal_dists) else float("nan"),
             "mean_goal_dist_m": float(goal_dists.mean()) if len(goal_dists) else float("nan"),
+            "trajectory_length_m": float(step_dists.sum()) if len(step_dists) else float("nan"),
+            "command_smoothness": float(smooth.mean()) if len(smooth) else float("nan"),
+            "latency_ms": float(np.mean(latencies)) if latencies else float("nan"),
+            "spike_rate_hz": float(np.mean(rates)) if rates else float("nan"),
             "peak_g_force": float(np.nanmax(g_forces)) if g_forces else float("nan"),
             "soc_end_pct": float(soc[-1]) if soc else float("nan"),
         }

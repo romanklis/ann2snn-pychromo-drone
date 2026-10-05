@@ -21,6 +21,25 @@ Two surfaces, both Docker-only:
   spike raster, control output, goal distance, clearance, telemetry, metrics).
   It is data-only; the visualization stays in Chrono.
 
+![Demo: PyChrono flight view and the comparison dashboard](docs/assets/demo.gif)
+
+*The interactive PyChrono view and the browser dashboard (`docs/assets/demo.mp4`
+is the higher-quality capture).*
+
+## Documentation
+
+Detailed, source-cited documentation lives in [`docs/`](docs/index.md):
+
+- [Architecture](docs/architecture.md) — modules, layers, per-frame data flow
+- [Physics](docs/physics.md) — equations of motion, actuator/battery model
+- [Estimation](docs/estimation.md) — sensor suite and the error-state UKF
+- [Sensing](docs/sensing.md) — obstacle geometry and the LiDAR scan + cues
+- [Potential field](docs/field.md) — field methodology, structured ANN → SNN
+- [Control](docs/control.md) — controllers and the execution loop
+
+Schematics are tracked as replaceable placeholders under
+[`docs/assets/schematics/`](docs/assets/schematics/README.md).
+
 ## Controllers
 
 | `--controller` | what it is |
@@ -29,13 +48,16 @@ Two surfaces, both Docker-only:
 | `pid` | classical PD + feed-forward baseline (collides with the pillar) |
 | `ann` | 1000-neuron sparse recurrent connectome ANN, distilled from the teacher |
 | `snn` | integrate-and-fire transfer of the connectome ANN (rate-coded, spiking) |
+| `field_ann` | small ANN → trajectory-anchored obstacle-field coefficients + DS modulation |
+| `field_snn` | spiking transfer of the field ANN; the SNN never outputs control commands |
 
 The SNN topology/dynamics match upstream: `N=1000`, fan-in `K=40` (40 000 edges),
 20 % inhibitory scaled ×4 (Dale's law), `seed=42`; the ANN is evaluated with 3
 recurrent steps per frame; the SNN runs 10 IF micro-steps per frame with
-`v_th=1.0`. Policy input is `[e(3), ė(3), u_ff(3), task features(4)] = 13` →
-3 accel commands. Inference is **numpy only** at runtime; torch is used only to
-distil (in a separate training image).
+`v_th=1.0`. Policy input is **sensor-conditioned**,
+`[e(3), ė(3), u_ff(3), LiDAR ranges(32), cues(5)] = 46` → 3 accel commands (or
+`K=24` field coefficients for the structured arms). Inference is **numpy only**
+at runtime; torch is used only to distil (in a separate training image).
 
 ## Quick start
 
@@ -104,10 +126,13 @@ then a slim Python runtime serves it) and runs it on `http://localhost:8080`.
   drone** per brain (body cross + rotors + body-frame triad, from the recorded
   attitude) and the **LiDAR rays/returns** for the selected sensor brain, a spike
   raster, control-output and tracking/clearance charts, a metrics/result bar, and a
-  shared play cursor. Header toggles: `drone`, `scan`, and a `rays for`
-  dropdown (`off` / `all` / per brain). The camera/zoom persist while the
-  animation plays (rotate the scene mid-play), and obstacles are drawn as
-  see-through boxes with an edge outline.
+  shared play cursor. The header is grouped into two dropdown menus: `Brains`
+  (which models run) and `View` (the `drone`/`rays`/`spikes` toggles, per-model
+  ray and spike checkboxes, and a `channels` selector for the raster). PID is
+  kept as a CLI/compare baseline but hidden from the dashboard. The spike raster
+  scales its height to the displayed channel count (64/128/200, uniform
+  subsampling with an `M/N` label when capped). The camera/zoom persist while the
+  animation plays, and obstacles are drawn as see-through boxes with an outline.
 - **Extended page** (`/extended`): multi-lane traces (position, velocity,
   attitude, tracking error, command, telemetry), a frame readout, and
   metrics/weights tables.
@@ -133,6 +158,74 @@ re-optimisation, just a reshaped velocity field.
 The dashboard has no in-browser training; it loads the committed
 `weights/quad6dof_connectome.npz`. If that bundle is missing, `ann`/`snn` are
 reported as unavailable and `ds_guidance`/`pid` still work.
+
+## State estimation (UKF, estimate-only control)
+
+The plant is the **hidden truth**; every controller — the DS teacher, PID and the
+learned ANN/SNN — sees only a fused state estimate. Each frame the loop runs
+`plant → sensors → UKF → controller`:
+
+- **Sensors** (`sensors.py`): GPS position (10 Hz, bias/dropouts), IMU specific
+  force + gyro (50 Hz, biases/noise/outliers), INS velocity/attitude, barometer
+  altitude, compass heading, and the LiDAR scan — with a seeded RNG for
+  determinism.
+- **UKF** (`estimator.py`): error-state (multiplicative) unscented filter over
+  `[p, v, quaternion, ω, rotor speeds, accel/gyro biases]`; the process model is a
+  simplified nonlinear quad (attitude kinematics, thrust mapping, rotor
+  first-order lag + saturation) driven by the applied rotor speeds.
+- **Rotor/actuator dynamics** already exist in the plant (first-order electrical
+  lag `tau_e`, motor speed dynamics, current/speed saturation); the estimator
+  mirrors a simplified version.
+
+Controllers consume `Observation(state=estimate)`; the true state is never passed
+to them. The learned arms are trained with the estimator in the loop (teacher
+labels on the estimate), so training matches deployment. The bundle fingerprint
+records the sensor suite + estimator config.
+
+**Honest limitation:** estimate-only control is harder than the truth-based demo.
+With the current estimator the teacher and ANN clear the pillar and approach the
+goal, but the closed loop orbits a little short of the 0.30 m tolerance, and the
+SNN can graze the pillar — improved estimator/DS tuning is follow-up work.
+
+## Structured SNN field + DS modulation
+
+Besides the end-to-end connectome controllers (`ann`/`snn`), the demo implements a
+**structured** architecture where the network does **not** learn the control law:
+
+```
+LiDAR (k ranges + cues)
+  → small SNN/ANN → a ∈ R_+^K        (compact obstacle-field coefficients, K=24)
+  → U_obs(x)=Σ a_k φ_k(x−c_k)        (trajectory-anchored Gaussian RBF potential)
+  → F_obs = −∇U_obs                  (analytic, conservative — never learned)
+  → Billard-style DS modulation       (M→I away from obstacles: goal attractor kept)
+  → nominal DS v_nom (stable)         (kept analytic)
+  → existing impedance → u → plant    (reused low-level controller)
+```
+
+- `field.py` — the potential basis (centres anchored to a short **nominal-DS
+  trajectory preview**, so the field is trajectory-relative), the privileged
+  teacher barrier potential `U*=Σ 0.5·max(0, d_inf−clearance)²`, analytic
+  gradient, modulation, and trajectory-cost/grid helpers.
+- `field_control.py` — `FieldDSController` (`field_ann`, `field_snn`); the SNN
+  outputs only the ``K`` coefficients.
+- `train_field.py` / `make train-field` — distils a **small** network (128
+  neurons, ~10k params) to the teacher potential sampled at the trajectory
+  centres; exports `weights/quad6dof_field.npz`.
+- `tools/compare_controllers.py` / `make compare` — the evaluation table.
+- `tools/field_viz.py` / `make field-viz` — a self-contained Plotly HTML showing
+  the LiDAR, learned `U_obs`/`F_obs`, nominal vs modulated DS and the trajectory.
+
+Result (estimate-only, `make compare SCENE=pillar`): the structured field nets are
+collision-free **and reach the goal**, with ~9× fewer parameters than the
+end-to-end SNN/ANN (which under-fit):
+
+```
+controller  coll  clr_min   final  reach  params
+ann            0    0.597   0.308  False   89000
+snn            0    0.727   1.944  False   89000
+field_ann      0    0.228   0.252   True    9984
+field_snn      0    0.229   0.251   True    9984
+```
 
 ## Weights and training
 
@@ -189,10 +282,15 @@ Quad6DoF (numpy) ─┬─> Simulation ─> ChronoViz (Chrono/Irrlicht)
 controller ───────┘
 ```
 
+See [docs/architecture.md](docs/architecture.md) for the full module map and the
+per-frame data flow.
+
 - The plant's 500 Hz inner substepping is preserved; one `Simulation.step()` is
   one 20 ms frame.
-- Controllers act on the **true** plant state (no Kalman estimator) — a
-  deliberate simplification, recorded in the weight fingerprint.
+- Controllers act on the **UKF state estimate**, not the hidden plant truth:
+  every frame runs `plant → sensors → UKF → controller` (see
+  [docs/estimation.md](docs/estimation.md)). The learned arms are distilled with
+  the estimator in the loop, so training matches deployment.
 - `ChronoDynamicsBackend` is a stub for a future Chrono-integrated rigid body.
 - Coordinates are z-up; the Irrlicht camera requests Z-up
   (`SetCameraVertical`), falling back to an `R_x(-90°)` geometry rotation.
@@ -200,12 +298,14 @@ controller ───────┘
 ## Layout
 
 ```
-src/drone6dof/       plant, controllers (ds/pid/ann/snn), policy, geometry, sensor,
-                     weights, train, scene/reference/task, sim, benchmark, viz, cli
+src/drone6dof/       plant, estimator (UKF), sensors, controllers
+                     (ds/pid/ann/snn/field_ann/field_snn), field, policy, geometry,
+                     scene/reference/task, weights, train, sim, benchmark, viz, cli
 server/              Flask API (app.py, wsgi.py) + tests
 web/                 Vite + Plotly frontend (hero + extended)
-weights/             committed connectome bundle + torch reference I/O
-tools/               vendored pure-numpy prototype (parity oracle)
+weights/             committed connectome + field bundles + torch reference I/O
+tools/               compare_controllers.py, field_viz.py (parity oracle snippet)
+docs/                architecture / physics / estimation / sensing / field / control
 Dockerfile           PyChrono+irrlicht demo image
 Dockerfile.train     CPU-torch distillation image
 Dockerfile.dashboard node build + Flask runtime
@@ -224,8 +324,7 @@ not audited here; see `NOTICE`.
 ## Out of scope
 
 Environment presets / robustness sweeps, multi-example selection, WebM/MP4
-recording, in-dashboard training, the dense ANN, `pychrono.sensor` / ROS 2, and
-the Kalman estimator.
+recording, in-dashboard training, the dense ANN, and `pychrono.sensor` / ROS 2.
 
 ## Attribution
 

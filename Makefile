@@ -11,6 +11,8 @@ DASH_IMAGE  ?= drone6dof-dashboard:latest
 CONTROLLER  ?= ds_guidance
 CAMERA      ?= orbit
 SECONDS     ?= 10
+SCENE       ?= pillar
+STEPS       ?= 500
 PORT        ?= 8080
 COMPOSE     ?= docker-compose
 XVFB        ?= bash scripts/xvfb.sh
@@ -71,6 +73,11 @@ train: ## distil the connectome ANN/SNN and write weights/ (in the training imag
 		--out weights/quad6dof_connectome.npz \
 		--ref-io weights/quad6dof_reference_io.npz
 
+train-field: ## train the structured LiDAR->field net -> weights/quad6dof_field.npz
+	mkdir -p weights
+	$(RUN) $(TRAIN_IMAGE) python -m drone6dof.train_field \
+		--out weights/quad6dof_field.npz
+
 train-shell: ## shell in the training image
 	docker run --rm -it --user $(HOST_UID):$(HOST_GID) $(MOUNT) $(TRAIN_IMAGE) bash
 
@@ -83,6 +90,13 @@ dashboard: ## build + run the comparison dashboard (http://localhost:$(PORT))
 
 dashboard-shell: ## shell in the dashboard image
 	docker run --rm -it --entrypoint sh $(DASH_IMAGE)
+
+compare: ## compare controllers (SCENE=pillar|boxes|wall|slalom)
+	$(RUN) $(TRAIN_IMAGE) python tools/compare_controllers.py --scene $(SCENE) --steps $(STEPS)
+
+field-viz: ## write out/field_frame.html for CONTROLLER on SCENE
+	mkdir -p out
+	$(RUN) $(OUTVOL) $(TRAIN_IMAGE) python tools/field_viz.py --controller $(CONTROLLER) --scene $(SCENE) --outdir /data
 
 docker-headless: ## run the headless compose service (writes ./out/telemetry.csv)
 	$(COMPOSE) run --rm headless
@@ -98,5 +112,5 @@ clean: ## remove host build artifacts and outputs
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
 
 .PHONY: help build shell demo pid headless frames test test-fast compile \
-	train-image train train-shell dashboard-build dashboard dashboard-shell \
-	docker-headless docker-interactive docker-test clean
+	train-image train train-field train-shell dashboard-build dashboard dashboard-shell \
+	compare field-viz docker-headless docker-interactive docker-test clean

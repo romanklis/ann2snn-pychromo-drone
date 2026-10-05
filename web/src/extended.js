@@ -12,7 +12,9 @@ const fmt = (v, d = 3) => (Number.isFinite(v) ? v.toFixed(d) : "—");
 async function boot() {
   const [health, cat] = await Promise.all([getHealth(), getControllers()]);
   const avail = cat.available || {};
-  state.selection = cat.catalogue.filter((c) => !avail[c.name] || avail[c.name].available).map((c) => c.name);
+  state.selection = cat.catalogue
+    .filter((c) => c.display !== false && (!avail[c.name] || avail[c.name].available))
+    .map((c) => c.name);
   $("badges").innerHTML =
     `<span class="badge ${health.trained ? "ok" : "bad"}">${health.trained ? "trained" : "untrained"}</span>` +
     `<span class="badge">${cat.defaults.steps} steps</span>`;
@@ -22,6 +24,7 @@ async function boot() {
 
   const box = $("picker");
   for (const c of cat.catalogue) {
+    if (c.display === false) continue;      // PID is a CLI/compare baseline only
     const ok = !avail[c.name] || avail[c.name].available;
     const label = document.createElement("label");
     label.className = "pick" + (ok ? "" : " disabled");

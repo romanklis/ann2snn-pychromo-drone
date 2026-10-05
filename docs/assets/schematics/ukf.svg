@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" role="img" aria-label="UKF schematic placeholder">
+  <rect width="960" height="540" fill="#0e141d"/>
+  <rect x="10" y="10" width="940" height="520" fill="none" stroke="#22303c" stroke-width="2" rx="10"/>
+  <text x="480" y="46" text-anchor="middle" fill="#c9d1d9" font-family="system-ui, sans-serif" font-size="22" font-weight="700">Error-state UKF</text>
+  <text x="480" y="74" text-anchor="middle" fill="#e0a030" font-family="system-ui, sans-serif" font-size="14">SCHEMATIC PLACEHOLDER — replace with final artwork</text>
+
+  <g font-family="system-ui, sans-serif" font-size="13" fill="#c9d1d9">
+    <rect x="50" y="120" width="380" height="120" fill="#111823" stroke="#22303c" rx="8"/>
+    <text x="240" y="146" text-anchor="middle" fill="#7b8a99" font-size="12">nominal state (23) + error covariance (22)</text>
+    <text x="240" y="178" text-anchor="middle">[ p, v, q, ω, ω_m, b_a, b_g ]</text>
+    <text x="240" y="202" text-anchor="middle" font-size="11" fill="#7b8a99">δx multiplicative on q (rotation vector)</text>
+    <text x="240" y="226" text-anchor="middle" font-size="11" fill="#7b8a99">P (22×22)</text>
+
+    <rect x="510" y="120" width="400" height="120" fill="#111823" stroke="#22303c" rx="8"/>
+    <text x="710" y="146" text-anchor="middle" fill="#7b8a99" font-size="12">sigma points (2n+1)</text>
+    <text x="710" y="178" text-anchor="middle">χ = x ⊞ ±√((n+λ)P)</text>
+    <text x="710" y="202" text-anchor="middle" font-size="11" fill="#7b8a99">α=0.3, β=2, κ=0</text>
+    <text x="710" y="226" text-anchor="middle" font-size="11" fill="#7b8a99">Cholesky (+ eigen fallback)</text>
+
+    <rect x="510" y="290" width="400" height="130" fill="#111823" stroke="#22303c" rx="8"/>
+    <text x="710" y="316" text-anchor="middle" fill="#7b8a99" font-size="12">predict (rotor target)</text>
+    <text x="710" y="346" text-anchor="middle" font-size="12">simple quad: thrust, kinematics,</text>
+    <text x="710" y="366" text-anchor="middle" font-size="12">attitude, ω̇, rotor lag</text>
+    <text x="710" y="392" text-anchor="middle" font-size="11" fill="#7b8a99">weighted mean + P = Q + Σ W (e eᵀ)</text>
+
+    <rect x="50" y="290" width="380" height="130" fill="#111823" stroke="#22303c" rx="8"/>
+    <text x="240" y="316" text-anchor="middle" fill="#7b8a99" font-size="12">update (stacked measurements)</text>
+    <text x="240" y="344" text-anchor="middle" font-size="12">GPS · IMU f/ω · INS v/att · baro · mag</text>
+    <text x="240" y="368" text-anchor="middle" font-size="12">S, P_xz, K = P_xz S⁻¹</text>
+    <text x="240" y="394" text-anchor="middle" font-size="11" fill="#7b8a99">x ⊞ K(z−z̄), P − K S Kᵀ; NIS logged</text>
+
+    <rect x="50" y="450" width="860" height="46" fill="#111823" stroke="#22303c" rx="8"/>
+    <text x="480" y="478" text-anchor="middle" font-size="12">Measurement gates per channel; no batch gate (one outlier must not reject every sensor)</text>
+  </g>
+
+  <g stroke="#22b8a6" stroke-width="2" fill="none" marker-end="url(#c)">
+    <defs><marker id="c" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#22b8a6"/></marker></defs>
+    <path d="M430,180 L510,180"/>
+    <path d="M710,240 L710,290"/>
+    <path d="M510,355 L430,355"/>
+    <path d="M240,420 L240,450"/>
+  </g>
+</svg>

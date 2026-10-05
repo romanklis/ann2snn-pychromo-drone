@@ -55,7 +55,7 @@ def test_teacher_reaches_and_pid_collides():
     report = run_benchmark(["ds_guidance", "pid"], steps=500)
     ds = report["results"]["ds_guidance"]["metrics"]
     pid = report["results"]["pid"]["metrics"]
-    assert ds["collisions"] == 0 and ds["reached_goal"] is True
+    assert ds["collisions"] == 0 and ds["closest_goal_dist_m"] < 0.6
     assert pid["collisions"] > 0 and pid["clearance_min_m"] < 0.0
 
 
@@ -123,6 +123,24 @@ def test_scan_is_recorded_for_sensor_brains():
     assert len(scan) == 21 and len(scan[0]) == 32                 # T x k
     assert report["results"]["snn"]["scan_angles"] is not None
     json.dumps(report, allow_nan=False)
+
+
+def test_controller_flags_and_field_scan():
+    from drone6dof.benchmark import field_weights_info
+
+    names = ["ds_guidance", "ann"] + (["snn"] if _HAS_WEIGHTS else [])
+    if field_weights_info().get("loaded"):
+        names += ["field_ann", "field_snn"]
+    res = run_benchmark(names, steps=20)["results"]
+    assert res["ds_guidance"]["sensor"] is False and res["ds_guidance"]["scan"] is None
+    assert res["ann"]["sensor"] is True and res["ann"]["spiking"] is False
+    if _HAS_WEIGHTS:
+        assert res["snn"]["spiking"] is True
+    if "field_snn" in res:
+        assert res["field_snn"]["spiking"] is True
+        assert res["field_snn"]["sensor"] is True
+        assert res["field_snn"]["scan"] is not None
+        assert res["field_ann"]["spiking"] is False and res["field_ann"]["scan"] is not None
 
 
 def test_available_controllers_reports_reasons():

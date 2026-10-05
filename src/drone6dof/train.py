@@ -31,18 +31,21 @@ from .config import (
     OBSTACLE_LAYOUT,
     PLANT_GAIN,
     SENSOR,
+    SENSOR_SUITE,
     STEPS,
     build_scene,
 )
 from .connectome import ConnectomeController, ConnectomeTopology, DEFAULTS
 from .control import DSGuidanceController
 from .dynamics import NumpyPlantBackend
+from .estimator import ErrorStateUKF
 from .geometry import BoxObstacle, Cylinder
 from .params import DT, QuadParams
 from .policy import error_vector
 from .reference import RefPoint, goal_reference
 from .scene import Scene
 from .sensor import SensorConfig, sensor_features
+from .sensors import SensorSuite
 from .sim import Simulation
 from .task import ObstacleGoalTask
 from .weights import DEFAULT_REF_IO_PATH, DEFAULT_WEIGHTS_PATH, default_fields, save_weights
@@ -86,7 +89,8 @@ def _sample_layout(rng: np.random.Generator, goal, start_xy) -> Tuple:
             hx = float(rng.uniform(spec["box_half_min"], spec["box_half_max"]))
             hy = float(rng.uniform(spec["box_half_min"], spec["box_half_max"]))
             angle = float(rng.uniform(0.0, np.pi)) if rng.random() < 0.5 else 0.0
-            obs = BoxObstacle(center=(cx, cy), half=(hx, hy), angle=angle)
+            obs = BoxObstacle(center=(cx, cy), half=(hx, hy), angle=angle,
+                              dead_radius=0.55, influence_radius=1.4)
             extent = float(np.hypot(hx, hy))
         margin = float(spec["min_clearance"])
         if np.hypot(cx - start_xy[0], cy - start_xy[1]) < extent + margin:
@@ -177,6 +181,33 @@ def build_dataset(
     return np.asarray(xs, dtype=np.float64), np.asarray(ys, dtype=np.float64)
 
 
+def _estimator_rollout(backend, layout_scene, ref, n_frames, teacher, rng, state0):
+    """Closed-loop rollout with plant (hidden) -> sensors -> UKF -> teacher.
+
+    The teacher and the recorded policy inputs see only the estimate, matching
+    deployment exactly.
+    """
+    estimator = ErrorStateUKF(params=backend.plant.p, sensor=SENSOR_SUITE, dt=DT)
+    sensors = SensorSuite(SENSOR_SUITE, lidar=SENSOR, obstacles=layout_scene.obstacles, dt=DT)
+    p0 = backend.reset(state0)
+    est = estimator.reset(p0[:3], p0[3:6])
+    sensors.reset()
+    xs, ys = [], []
+    for k in range(int(n_frames)):
+        rp = ref.at(k)
+        u = teacher.act(est, rp)
+        xs.append(_input(est, rp, layout_scene, SENSOR, rng))
+        ys.append(np.asarray(u, dtype=np.float64))
+        backend.step(u, dt=DT, limit=CONTROL_LIMIT, gain=PLANT_GAIN)
+        truth = {
+            "p": backend.position, "v": np.asarray(backend.state, dtype=np.float64)[3:6],
+            "R": backend.rotation, "omega": backend.omega, "omega_m": backend.omega_m,
+            "mass": backend.plant.p.m, "C_T": backend.plant.p.C_T,
+        }
+        est = estimator.step(sensors.measure(k + 1, truth), backend.rotor_target)
+    return xs, ys
+
+
 def build_sequences(
     scene,
     *,
@@ -184,12 +215,12 @@ def build_sequences(
     traj_len: int = 500,
     seed: int = 0,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Teacher-driven trajectories over the pooled scenes, hidden state carried.
+    """Teacher trajectories over the pooled scenes **through the estimator**.
 
-    The first trajectory is the shipped scene; the rest use randomised box
-    layouts and goals.  Training on these with the hidden state carried matches
-    deployment (this is what stops the behaviour-cloning drift) and teaches the
-    sensor-conditioned field for many shapes at once.
+    Each trajectory runs the hidden plant, the sensor suite and the UKF, and the
+    teacher/inputs use only the estimate, so training matches estimate-only
+    deployment.  The hidden state is carried (no drift) and the first trajectory
+    is the shipped scene.
     """
     task = ObstacleGoalTask(goal_tolerance=0.30)
     teacher = DSGuidanceController(
@@ -205,20 +236,14 @@ def build_sequences(
         goal = layout_scene.goal_np
         ref = goal_reference(steps=traj_len, goal=goal, dt=DT, meta={"scene": layout_scene})
         if i == 0:
-            state = np.asarray(INIT_STATE, dtype=np.float64)
+            state0 = np.asarray(INIT_STATE, dtype=np.float64)
         else:
             pos = rng.uniform(-hi, hi)
             pos[2] = rng.uniform(0.0, hi[2])
             vel = rng.normal(0.0, 0.5, size=3)
-            state = np.concatenate([pos, vel])
+            state0 = np.concatenate([pos, vel])
         backend = NumpyPlantBackend(QuadParams(), heading_target=goal)
-        state = backend.reset(state)
-        xs, ys = [], []
-        for k in range(int(traj_len)):
-            rp = ref.at(k)
-            xs.append(_input(state, rp, layout_scene, SENSOR, rng))
-            ys.append(teacher.act(state, rp))
-            state = backend.step(ys[-1], dt=DT, limit=CONTROL_LIMIT, gain=PLANT_GAIN)
+        xs, ys = _estimator_rollout(backend, layout_scene, ref, traj_len, teacher, rng, state0)
         xs_all.append(xs)
         ys_all.append(ys)
     return np.asarray(xs_all, dtype=np.float64), np.asarray(ys_all, dtype=np.float64)
@@ -227,7 +252,7 @@ def build_sequences(
 def train_connectome(
     scene,
     *,
-    epochs: int = 80,
+    epochs: int = 120,
     batch_size: int = 1024,
     lr: float = 0.006,
     n_random: int = 3000,
@@ -401,7 +426,7 @@ def _closed_loop_metrics(scene, controller, *, steps: int = STEPS) -> dict:
 
 def main(argv: Optional[list] = None) -> int:
     ap = argparse.ArgumentParser(description="Distil and export the connectome ANN/SNN bundle")
-    ap.add_argument("--epochs", type=int, default=80)
+    ap.add_argument("--epochs", type=int, default=120)
     ap.add_argument("--batch-size", type=int, default=1024)
     ap.add_argument("--lr", type=float, default=0.006)
     ap.add_argument("--random-samples", type=int, default=3000)

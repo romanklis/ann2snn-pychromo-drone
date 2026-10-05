@@ -34,7 +34,14 @@ def test_controllers_catalogue(client):
     assert r.status_code == 200
     body = r.get_json()
     names = [c["name"] for c in body["catalogue"]]
-    assert names == ["ds_guidance", "pid", "ann", "snn"]
+    assert names == ["ds_guidance", "pid", "ann", "snn", "field_ann", "field_snn"]
+    meta = {c["name"]: c for c in body["catalogue"]}
+    assert meta["pid"]["display"] is False                 # hidden from the dashboard
+    assert meta["ds_guidance"]["sensor"] is False
+    assert meta["ann"]["sensor"] is True and meta["ann"]["spiking"] is False
+    assert meta["snn"]["spiking"] is True
+    assert meta["field_ann"]["sensor"] is True and meta["field_ann"]["spiking"] is False
+    assert meta["field_snn"]["spiking"] is True and meta["field_snn"]["sensor"] is True
     assert body["defaults"]["steps"] >= 1
     assert body["scene"]["goal"] == [0.0, 0.0, 2.5]
 

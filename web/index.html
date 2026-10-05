@@ -11,7 +11,10 @@
       <div class="brand">ANN2SNN · 6-DoF drone</div>
       <div id="badges" class="badges"></div>
       <div class="controls">
-        <div id="picker" class="picker"></div>
+        <details class="menu" id="menu-brains">
+          <summary>Brains</summary>
+          <div class="menu-body"><div id="picker" class="picker"></div></div>
+        </details>
         <div class="goal">
           <span class="goal-label">scene</span>
           <select id="scene" class="goal-input"></select>
@@ -24,11 +27,27 @@
           <button id="set-goal" title="Re-run at this goal">Set</button>
           <button id="reset-goal" title="Shipped goal (0, 0, 2.5)">Reset</button>
         </div>
-        <label class="pick"><input type="checkbox" id="show-drone" checked /> drone</label>
-        <label class="pick"><input type="checkbox" id="show-scan" checked /> scan</label>
-        <label class="goal-label">rays
-          <select id="scan-brain" class="goal-input"></select>
-        </label>
+        <details class="menu" id="menu-view">
+          <summary>View</summary>
+          <div class="menu-body">
+            <label class="pick"><input type="checkbox" id="show-path" checked /> path</label>
+            <div id="path-brains" class="picker" title="trajectories per model"></div>
+            <label class="pick"><input type="checkbox" id="show-drone" checked /> drone</label>
+            <div id="drone-brains" class="picker" title="drones per model"></div>
+            <label class="pick"><input type="checkbox" id="show-scan" checked /> rays</label>
+            <div id="scan-brains" class="picker" title="LiDAR rays per model"></div>
+            <label class="pick"><input type="checkbox" id="show-spikes" checked /> spikes</label>
+            <div id="spike-brains" class="picker" title="spike raster per model"></div>
+            <div class="goal">
+              <span class="goal-label">channels</span>
+              <select id="raster-channels" class="goal-input">
+                <option value="64">64</option>
+                <option value="128">128</option>
+                <option value="200" selected>200</option>
+              </select>
+            </div>
+          </div>
+        </details>
         <span id="goal-label" class="clock"></span>
         <span id="status" class="status"></span>
         <button id="play" title="Play / pause">Play</button>

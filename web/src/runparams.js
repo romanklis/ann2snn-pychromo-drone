@@ -3,6 +3,8 @@ export const COLORS = {
   pid: "#8a8f98",
   ann: "#4f8cff",
   snn: "#22b8a6",
+  field_ann: "#c77dff",
+  field_snn: "#f72585",
 };
 
 export const SHORT = {
@@ -10,9 +12,11 @@ export const SHORT = {
   pid: "PID",
   ann: "ANN",
   snn: "SNN",
+  field_ann: "FIELD·ANN",
+  field_snn: "FIELD·SNN",
 };
 
-export const DEFAULT_SELECTION = ["ds_guidance", "ann", "snn"];
+export const DEFAULT_SELECTION = ["ds_guidance", "ann", "snn", "field_snn"];
 
 export function colorOf(name) {
   return COLORS[name] || "#c9d1d9";

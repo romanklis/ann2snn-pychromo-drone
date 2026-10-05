@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" role="img" aria-label="Architecture schematic placeholder">
+  <rect width="960" height="540" fill="#0e141d"/>
+  <rect x="10" y="10" width="940" height="520" fill="none" stroke="#22303c" stroke-width="2" rx="10"/>
+  <text x="480" y="46" text-anchor="middle" fill="#c9d1d9" font-family="system-ui, sans-serif" font-size="22" font-weight="700">System architecture</text>
+  <text x="480" y="74" text-anchor="middle" fill="#e0a030" font-family="system-ui, sans-serif" font-size="14">SCHEMATIC PLACEHOLDER — replace with final artwork</text>
+
+  <g font-family="system-ui, sans-serif" font-size="13" fill="#c9d1d9">
+    <rect x="40" y="110" width="260" height="150" fill="#111823" stroke="#22303c" rx="8"/>
+    <text x="170" y="136" text-anchor="middle" fill="#7b8a99" font-size="12">runtime (numpy only)</text>
+    <rect x="60" y="150" width="220" height="34" fill="#0e141d" stroke="#22303c" rx="6"/><text x="170" y="172" text-anchor="middle">Simulation (sim.py)</text>
+    <rect x="60" y="196" width="220" height="34" fill="#0e141d" stroke="#22303c" rx="6"/><text x="170" y="218" text-anchor="middle">Quad6DoF plant</text>
+
+    <rect x="350" y="110" width="260" height="150" fill="#111823" stroke="#22303c" rx="8"/>
+    <text x="480" y="136" text-anchor="middle" fill="#7b8a99" font-size="12">estimation loop</text>
+    <rect x="370" y="150" width="220" height="34" fill="#0e141d" stroke="#22303c" rx="6"/><text x="480" y="172" text-anchor="middle">SensorSuite</text>
+    <rect x="370" y="196" width="220" height="34" fill="#0e141d" stroke="#22303c" rx="6"/><text x="480" y="218" text-anchor="middle">ErrorStateUKF → controller</text>
+
+    <rect x="660" y="110" width="260" height="150" fill="#111823" stroke="#22303c" rx="8"/>
+    <text x="790" y="136" text-anchor="middle" fill="#7b8a99" font-size="12">surfaces</text>
+    <rect x="680" y="150" width="220" height="34" fill="#0e141d" stroke="#22303c" rx="6"/><text x="790" y="172" text-anchor="middle">ChronoViz (PyChrono)</text>
+    <rect x="680" y="196" width="220" height="34" fill="#0e141d" stroke="#22303c" rx="6"/><text x="790" y="218" text-anchor="middle">Flask API → Vite/Plotly</text>
+
+    <rect x="40" y="300" width="880" height="90" fill="#111823" stroke="#22303c" rx="8"/>
+    <text x="480" y="328" text-anchor="middle" fill="#7b8a99" font-size="12">offline (torch, training image)</text>
+    <rect x="80" y="342" width="240" height="34" fill="#0e141d" stroke="#22303c" rx="6"/><text x="200" y="364" text-anchor="middle">train.py (connectome)</text>
+    <rect x="360" y="342" width="240" height="34" fill="#0e141d" stroke="#22303c" rx="6"/><text x="480" y="364" text-anchor="middle">train_field.py (field)</text>
+    <rect x="640" y="342" width="240" height="34" fill="#0e141d" stroke="#22303c" rx="6"/><text x="760" y="364" text-anchor="middle">weights/*.npz + fingerprint</text>
+  </g>
+
+  <g stroke="#22b8a6" stroke-width="2" fill="none" marker-end="url(#a)">
+    <defs><marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#22b8a6"/></marker></defs>
+    <path d="M280,183 L370,183"/>
+    <path d="M610,183 L680,183"/>
+    <path d="M480,260 L300,300"/>
+    <path d="M480,260 L700,300"/>
+  </g>
+</svg>

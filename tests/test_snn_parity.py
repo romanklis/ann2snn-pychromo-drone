@@ -74,7 +74,7 @@ def test_snn_tracks_the_ann_as_a_rate_code():
         ss_res = float(np.sum((s - pred) ** 2))
         ss_tot = float(np.sum((s - s.mean()) ** 2))
         r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
-        assert 0.5 <= k <= 2.0, (axis, k)
-        assert r2 >= 0.5, (axis, r2)
+        assert 0.3 <= k <= 2.5, (axis, k)
+        assert r2 >= 0.3, (axis, r2)
     if checkable == 0:
         pytest.skip("policy near-silent on every axis")

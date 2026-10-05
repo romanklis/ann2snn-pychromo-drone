@@ -37,11 +37,29 @@ header {
 .badge.ok { color: #0b0f14; background: var(--accent); border-color: var(--accent); font-weight: 700; }
 .badge.bad { color: #ffd7d7; border-color: #5a2a2a; }
 
-.controls { display: flex; align-items: center; gap: 12px; }
+.controls { display: flex; align-items: center; gap: 10px; }
 .picker { display: flex; gap: 10px; flex-wrap: wrap; }
 .pick { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); cursor: pointer; }
 .pick.disabled { opacity: 0.45; cursor: not-allowed; }
 .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+
+/* header dropdown menus (native <details>) */
+.menu { position: relative; }
+.menu > summary {
+  list-style: none; cursor: pointer; user-select: none;
+  padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px;
+  font-size: 12px; color: var(--fg); white-space: nowrap;
+}
+.menu > summary::-webkit-details-marker { display: none; }
+.menu > summary::after { content: " ▾"; color: var(--muted); }
+.menu[open] > summary { border-color: var(--accent); }
+.menu-body {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 30;
+  min-width: 240px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; padding: 10px; display: flex; flex-direction: column;
+  gap: 8px; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+}
+.menu-body .picker { flex-wrap: wrap; }
 
 button {
   background: #1b2531; color: var(--fg); border: 1px solid var(--line);
@@ -67,7 +85,7 @@ main { display: grid; grid-template-columns: 1fr 460px; flex: 1; min-height: 0; 
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
 .card h3 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); font-weight: 600; }
 .note { color: var(--muted); font-weight: 400; text-transform: none; letter-spacing: 0; }
-canvas#raster { width: 100%; height: 180px; background: #0b0f14; border-radius: 4px; }
+canvas#raster { width: 100%; background: #0b0f14; border-radius: 4px; display: block; }
 .chart { width: 100%; }
 .tall { height: 180px; }
 
@@ -77,9 +95,10 @@ canvas#raster { width: 100%; height: 180px; background: #0b0f14; border-radius: 
 .arrow { color: var(--accent); }
 .pipe-note { margin-top: 6px; color: var(--muted); font-size: 11px; }
 
-.resultbar { border-top: 1px solid var(--line); background: var(--panel2); padding: 6px 14px; }
+.resultbar { position: relative; z-index: 1; border-top: 1px solid var(--line); background: var(--panel2); padding: 6px 14px; }
 .result-title { font-size: 10px; letter-spacing: 1px; color: var(--muted); }
-.cells { display: flex; gap: 16px; flex-wrap: wrap; font-size: 11px; }
+.cells { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; font-size: 11px; }
+.cell { display: inline-flex; align-items: center; gap: 5px; }
 .cell.delta { color: var(--accent); }
 .cell.bad { color: #e0a030; }
 

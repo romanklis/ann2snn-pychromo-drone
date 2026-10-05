@@ -40,6 +40,8 @@ CONTROLLERS = [
     ("pid", "PID baseline"),
     ("ann", "Connectome ANN"),
     ("snn", "Connectome SNN (spiking)"),
+    ("field_ann", "Structured field ANN + DS"),
+    ("field_snn", "Structured field SNN + DS"),
 ]
 
 _GUIDE = {
@@ -47,6 +49,19 @@ _GUIDE = {
     "pid": "Classical PD + feed-forward baseline; flies straight into the pillar.",
     "ann": "1000-neuron sparse recurrent connectome ANN, distilled from the teacher.",
     "snn": "Integrate-and-fire transfer of the connectome ANN (rate-coded).",
+    "field_ann": "Small ANN predicting trajectory-anchored obstacle-field coefficients; DS modulation.",
+    "field_snn": "Spiking transfer of the field ANN; the SNN never outputs control commands.",
+}
+
+#: capability flags shared by the catalogue and the report
+#: ``sensor`` = has a LiDAR scan, ``spiking`` = emits spikes, ``display`` = shown in the dashboard
+_META = {
+    "ds_guidance": {"sensor": False, "spiking": False, "recurrent": False, "display": True},
+    "pid": {"sensor": False, "spiking": False, "recurrent": False, "display": False},
+    "ann": {"sensor": True, "spiking": False, "recurrent": True, "display": True},
+    "snn": {"sensor": True, "spiking": True, "recurrent": True, "display": True},
+    "field_ann": {"sensor": True, "spiking": False, "recurrent": True, "display": True},
+    "field_snn": {"sensor": True, "spiking": True, "recurrent": True, "display": True},
 }
 
 
@@ -56,8 +71,7 @@ def controller_catalogue() -> List[dict]:
             "name": name,
             "label": label,
             "guide": _GUIDE[name],
-            "spiking": name == "snn",
-            "recurrent": name in ("ann", "snn"),
+            **_META[name],
         }
         for name, label in CONTROLLERS
     ]
@@ -86,14 +100,45 @@ def weights_info(weights_path=None) -> dict:
     }
 
 
+def field_weights_info(path=None) -> dict:
+    """Load-ability of the structured field bundle (does not raise)."""
+    from .weights import (
+        DEFAULT_FIELD_PATH,
+        WeightsMissing,
+        WeightsMismatch,
+        load_field_weights,
+    )
+
+    path = str(path or DEFAULT_FIELD_PATH)
+    try:
+        bundle = load_field_weights(path)
+    except (WeightsMissing, WeightsMismatch) as exc:
+        return {"loaded": False, "path": path, "reason": str(exc)}
+    except Exception as exc:  # pragma: no cover - defensive
+        return {"loaded": False, "path": path, "reason": f"{type(exc).__name__}: {exc}"}
+    return {
+        "loaded": True,
+        "path": path,
+        "fingerprint": bundle.get("fingerprint"),
+        "k": int(bundle.get("n_out", 0)),
+        "n_neurons": int(bundle.get("n_neurons", 0)),
+    }
+
+
 def available_controllers(weights_path=None) -> Dict[str, dict]:
     info = weights_info(weights_path)
+    field_info = field_weights_info()
     out = {}
     for name, _ in CONTROLLERS:
         if name in ("ann", "snn"):
             out[name] = {
                 "available": bool(info["loaded"]),
                 "reason": "" if info["loaded"] else f"weights not loaded: {info.get('reason', '')}",
+            }
+        elif name in ("field_ann", "field_snn"):
+            out[name] = {
+                "available": bool(field_info["loaded"]),
+                "reason": "" if field_info["loaded"] else f"field weights not loaded: {field_info.get('reason', '')}",
             }
         else:
             out[name] = {"available": True, "reason": ""}
@@ -163,6 +208,10 @@ def run_controller(
     history = sim.history
     state = np.asarray(history["state"], dtype=np.float64)
     metrics = sim.metrics()
+    if history["estimate"]:
+        err = np.asarray(history["est_error"], dtype=np.float64)
+        metrics = dict(metrics)
+        metrics["pos_rmse_m"] = float(np.sqrt(np.mean(np.sum(err ** 2, axis=1))))
 
     spikes = None
     if any(s is not None for s in history["spikes"]):
@@ -185,8 +234,9 @@ def run_controller(
     return {
         "controller": name,
         "label": label,
-        "spiking": name == "snn",
-        "recurrent": name in ("ann", "snn"),
+        "spiking": _META[name]["spiking"],
+        "sensor": _META[name]["sensor"],
+        "recurrent": _META[name]["recurrent"],
         "t": [float(k * dt) for k in range(len(state))],
         "trajectory": state[:, :3].tolist(),
         "state": state.tolist(),
@@ -199,6 +249,9 @@ def run_controller(
         "spikes": None if spikes is None else spikes.tolist(),
         "scan": None if scan is None else np.round(scan, 3).tolist(),
         "scan_angles": None if (scan is None or angles is None) else [float(a) for a in angles],
+        "estimate": None if not history["estimate"] else np.round(
+            np.asarray(history["estimate"], dtype=np.float64), 3
+        ).tolist(),
         "metrics": metrics,
     }
 

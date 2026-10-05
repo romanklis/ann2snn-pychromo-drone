@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" role="img" aria-label="LiDAR schematic placeholder">
+  <rect width="960" height="540" fill="#0e141d"/>
+  <rect x="10" y="10" width="940" height="520" fill="none" stroke="#22303c" stroke-width="2" rx="10"/>
+  <text x="480" y="46" text-anchor="middle" fill="#c9d1d9" font-family="system-ui, sans-serif" font-size="22" font-weight="700">LiDAR scan and cues</text>
+  <text x="480" y="74" text-anchor="middle" fill="#e0a030" font-family="system-ui, sans-serif" font-size="14">SCHEMATIC PLACEHOLDER — replace with final artwork</text>
+
+  <g font-family="system-ui, sans-serif" font-size="13" fill="#c9d1d9">
+    <circle cx="300" cy="300" r="150" fill="none" stroke="#22303c"/>
+    <circle cx="300" cy="300" r="6" fill="#4f8cff"/>
+    <text x="300" y="288" text-anchor="middle" font-size="11" fill="#7b8a99">drone</text>
+    <g stroke="#4f8cff" stroke-width="1" opacity="0.6">
+      <line x1="300" y1="300" x2="450" y2="300"/>
+      <line x1="300" y1="300" x2="406" y2="406"/>
+      <line x1="300" y1="300" x2="300" y2="450"/>
+      <line x1="300" y1="300" x2="194" y2="406"/>
+      <line x1="300" y1="300" x2="150" y2="300"/>
+      <line x1="300" y1="300" x2="194" y2="194"/>
+      <line x1="300" y1="300" x2="300" y2="150"/>
+      <line x1="300" y1="300" x2="406" y2="194"/>
+    </g>
+    <rect x="420" y="230" width="90" height="90" fill="#d9a24a" opacity="0.35" stroke="#e0b25e" stroke-width="2"/>
+    <circle cx="420" cy="300" r="6" fill="#f72585"/>
+    <text x="470" y="222" text-anchor="middle" font-size="11" fill="#7b8a99">nearest return i*</text>
+
+    <rect x="600" y="140" width="320" height="330" fill="#111823" stroke="#22303c" rx="8"/>
+    <text x="760" y="168" text-anchor="middle" fill="#7b8a99" font-size="12">scan model</text>
+    <text x="620" y="200" font-size="12">k = 32 beams over 360°</text>
+    <text x="620" y="226" font-size="12">r_max = 3 m, σ_range = 0.02 m</text>
+    <text x="620" y="252" font-size="12">dropout 2 %, max-range miss 1 %</text>
+    <text x="620" y="278" font-size="12">ideal = ray_cast(boxes, cylinders)</text>
+    <text x="620" y="316" fill="#7b8a99" font-size="12">derived cues (5)</text>
+    <text x="620" y="342" font-size="12">min range / r_max</text>
+    <text x="620" y="366" font-size="12">bearing (cos, sin)</text>
+    <text x="620" y="390" font-size="12">slope (central difference)</text>
+    <text x="620" y="414" font-size="12">curvature (second difference)</text>
+    <text x="620" y="448" font-size="11" fill="#7b8a99">→ features [e, ė, u_ff, ranges/k, cues] = 46</text>
+  </g>
+</svg>

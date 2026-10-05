@@ -29,7 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--controller",
-        choices=["ds_guidance", "pid", "ann", "snn"],
+        choices=["ds_guidance", "pid", "ann", "snn", "field_ann", "field_snn"],
         default="ds_guidance",
         help="controller driving the drone (default: ds_guidance)",
     )
@@ -88,6 +88,12 @@ def make_controller(name: str, scene, control_limit: float, weights_path=None):
         path = weights_path or DEFAULT_WEIGHTS_PATH
         bundle = load_weights(path, expect_fields=default_fields())
         return ConnectomeController(name, bundle, action_limit=control_limit)
+    if name in ("field_ann", "field_snn"):
+        from .field_control import FieldDSController
+        from .weights import DEFAULT_FIELD_PATH, default_field_fields, load_field_weights
+
+        bundle = load_field_weights(DEFAULT_FIELD_PATH, expect_fields=default_field_fields())
+        return FieldDSController(name, bundle, action_limit=control_limit)
     raise ValueError(f"unknown controller {name!r}")
 
 

@@ -1,7 +1,7 @@
 import { getControllers, getHealth, runBenchmark } from "./api.js";
 import { DEFAULT_SELECTION, SHORT, colorOf, DEFAULT_GOAL, readGoal, writeGoal, goalError, readScene, writeScene } from "./runparams.js";
 import { buildStage, updateStage } from "./stage.js";
-import { drawRaster } from "./raster.js";
+import { drawRasters, activeChannelCount } from "./raster.js";
 import { lineChart, setCursor } from "./chart.js";
 
 const state = {
@@ -16,8 +16,13 @@ const state = {
   scene: readScene(),
   showDrone: true,
   showScan: true,
-  scanMode: "all",
-  sensorBrains: [],
+  showSpikes: true,
+  showPath: true,
+  scanSet: [],
+  spikeSet: [],
+  droneSet: [],
+  pathSet: [],
+  rasterChannels: 200,
   lastStageMs: 0,
 };
 
@@ -31,6 +36,7 @@ async function boot() {
     buildPicker(cat);
     buildSceneSelect(cat.scenes);
     buildVizControls(cat);
+    initMenus();
   } catch (err) {
     $("badges").textContent = `server error: ${err.message}`;
     return;
@@ -188,44 +194,109 @@ function renderBadges(health, cat) {
 }
 
 function vizOpts() {
-  let scanBrains = [];
-  if (state.showScan) {
-    if (state.scanMode === "all") scanBrains = [...state.sensorBrains];
-    else if (state.scanMode !== "off") scanBrains = [state.scanMode];
-  }
-  return { showDrone: state.showDrone, showScan: state.showScan, scanBrains };
+  return {
+    showDrone: state.showDrone,
+    showScan: state.showScan,
+    showPath: state.showPath,
+    droneBrains: [...state.droneSet],
+    pathBrains: state.showPath ? [...state.pathSet] : [],
+    scanBrains: state.showScan ? [...state.scanSet] : [],
+  };
 }
 
-function redrawStage() {
+function redrawOverlays() {
   if (!state.report) return;
   const idx = state.playing ? state.cursor : null;
-  if (!stageRefs) {
-    stageRefs = buildStage($("stage"), state.report, state.report.controllers, vizOpts());
-  } else {
-    updateStage($("stage"), state.report, stageRefs, idx, vizOpts());
+  // Rebuild so View toggles (drones/rays/spikes visibility) take effect; the
+  // camera is preserved via the live-camera read in sceneLayout().
+  stageRefs = buildStage($("stage"), state.report, state.report.controllers, {
+    ...vizOpts(),
+    markerIdx: idx,
+  });
+  paintSpikes(state.report, idx);
+}
+
+function paintSpikes(report, uptoIdx) {
+  const canvas = $("raster");
+  if (!canvas) return;
+  const names = state.showSpikes
+    ? state.spikeSet.filter((n) => report.results[n] && report.results[n].spikes)
+    : [];
+  const rows = names.length
+    ? names.map((n) => Math.max(1, Math.min(state.rasterChannels, activeChannelCount(report, n))))
+    : [state.rasterChannels];
+  const height = Math.min(480, Math.max(120, rows.reduce((a, b) => a + b, 0) * 2));
+  if (canvas.height !== height) {
+    canvas.height = height;
+    canvas.style.height = `${height}px`;
   }
+  drawRasters(canvas, report, names, uptoIdx, { channels: state.rasterChannels });
+}
+
+function initMenus() {
+  // close any open header dropdown when clicking outside it
+  document.addEventListener("click", (e) => {
+    document.querySelectorAll("details.menu[open]").forEach((d) => {
+      if (!d.contains(e.target)) d.removeAttribute("open");
+    });
+  });
 }
 
 function buildVizControls(cat) {
-  state.sensorBrains = (cat.catalogue || []).filter((c) => c.recurrent).map((c) => c.name);
-  const sel = $("scan-brain");
-  const options = [["off", "off"], ["all", "all"],
-    ...state.sensorBrains.map((n) => [n, SHORT[n] || n])];
-  sel.innerHTML = options.map(([v, label]) => `<option value="${v}">${label}</option>`).join("");
-  if (!["off", "all", ...state.sensorBrains].includes(state.scanMode)) state.scanMode = "all";
-  sel.value = state.scanMode;
+  const catalogue = cat.catalogue || [];
+  const sensors = catalogue.filter((c) => c.sensor).map((c) => c.name);
+  const spiking = catalogue.filter((c) => c.spiking).map((c) => c.name);
+  const drones = catalogue.filter((c) => c.display !== false).map((c) => c.name);
+  state.scanSet = sensors.slice();
+  state.spikeSet = spiking.slice();
+  state.droneSet = drones.slice();
+  state.pathSet = drones.slice();
+
+  const mkChecks = (box, names, set) => {
+    box.innerHTML = "";
+    for (const n of names) {
+      const label = document.createElement("label");
+      label.className = "pick";
+      label.innerHTML = `<input type="checkbox" value="${n}" checked/>`
+        + `<span class="dot" style="background:${colorOf(n)}"></span>${SHORT[n] || n}`;
+      label.querySelector("input").addEventListener("change", () => {
+        const on = [...box.querySelectorAll("input:checked")].map((i) => i.value);
+        set.length = 0;
+        set.push(...on);
+        redrawOverlays();
+      });
+      box.appendChild(label);
+    }
+  };
+  mkChecks($("path-brains"), drones, state.pathSet);
+  mkChecks($("drone-brains"), drones, state.droneSet);
+  mkChecks($("scan-brains"), sensors, state.scanSet);
+  mkChecks($("spike-brains"), spiking, state.spikeSet);
+
+  $("show-path").addEventListener("change", () => {
+    state.showPath = $("show-path").checked;
+    redrawOverlays();
+  });
   $("show-drone").addEventListener("change", () => {
     state.showDrone = $("show-drone").checked;
-    redrawStage();
+    redrawOverlays();
   });
   $("show-scan").addEventListener("change", () => {
     state.showScan = $("show-scan").checked;
-    redrawStage();
+    redrawOverlays();
   });
-  sel.addEventListener("change", () => {
-    state.scanMode = sel.value;
-    redrawStage();
+  $("show-spikes").addEventListener("change", () => {
+    state.showSpikes = $("show-spikes").checked;
+    redrawOverlays();
   });
+  const ch = $("raster-channels");
+  if (ch) {
+    ch.value = String(state.rasterChannels);
+    ch.addEventListener("change", () => {
+      state.rasterChannels = Number(ch.value) || 200;
+      redrawOverlays();
+    });
+  }
 }
 
 function buildSceneSelect(scenes) {
@@ -247,6 +318,7 @@ function buildPicker(cat) {
   const box = $("picker");
   box.innerHTML = "";
   for (const c of cat.catalogue) {
+    if (c.display === false) continue;      // e.g. PID is a CLI/compare baseline only
     const ok = !avail[c.name] || avail[c.name].available;
     const id = `pick-${c.name}`;
     const label = document.createElement("label");
@@ -271,9 +343,8 @@ function firstResult() {
 function renderAll() {
   if (!state.report || !Array.isArray(state.report.controllers)) return;
   const r = state.report;
-  stageRefs = buildStage($("stage"), r, r.controllers, vizOpts());
-  const snnName = r.controllers.find((n) => r.results[n].spiking);
-  drawRaster($("raster"), snnName ? r.results[snnName] : null, null);
+  stageRefs = buildStage($("stage"), r, r.controllers, { ...vizOpts(), markerIdx: 0 });
+  paintSpikes(r, null);
   renderCharts();
   renderResultBar();
 }
@@ -316,13 +387,13 @@ function renderResultBar() {
   const rows = r.controllers.map((n) => {
     const m = pc[n] || r.results[n].metrics;
     return `<div class="cell"><span class="dot" style="background:${colorOf(n)}"></span>
-      <b>${SHORT[n] || n}</b><br/>mean ${fmt(m.mean_goal_dist_m)} m ·
+      <b>${SHORT[n] || n}</b> mean ${fmt(m.mean_goal_dist_m)} m ·
       final ${fmt(m.final_goal_dist_m)} m · clear ${fmt(m.clearance_min_m)} ·
       hit ${m.collisions} · ${m.reached_goal ? "REACHED" : "not reached"}</div>`;
   });
   const d = r.stats && r.stats.snn_minus_ann;
   const delta = d
-    ? `<div class="cell delta">Δ SNN−ANN<br/>mean ${fmt(d.mean_goal_dist_m)} m ·
+    ? `<div class="cell delta">Δ SNN−ANN mean ${fmt(d.mean_goal_dist_m)} m ·
        final ${fmt(d.final_goal_dist_m)} m · clear ${fmt(d.clearance_min_m)}</div>`
     : "";
   const un = Object.keys(r.unavailable || {});
@@ -369,8 +440,7 @@ function paintCursor() {
   const now = performance.now();
   if (now - state.lastStageMs > 45) {
     updateStage($("stage"), r, stageRefs, state.cursor, vizOpts());
-    const snnName = r.controllers.find((n) => r.results[n].spiking);
-    drawRaster($("raster"), snnName ? r.results[snnName] : null, state.cursor);
+    paintSpikes(r, state.cursor);
     const cx = ref ? ref.t[Math.min(state.cursor, ref.t.length - 1)] : null;
     for (const id of ["ctrl-chart", "track-chart", "clear-chart"]) setCursor($(id), cx);
     state.lastStageMs = now;

@@ -46,6 +46,11 @@ policy changes are **original** to this port (not upstream): the upstream DS
 handles a single cylinder, whereas this adds closest-point modulation for
 oriented boxes and a LiDAR-conditioned teacher-student setup.
 
+`src/drone6dof/field.py`, `field_control.py` and `train_field.py` are **original**:
+a structured architecture where the spiking network learns a compact,
+trajectory-anchored obstacle-field representation (not a control law) that
+modulates the analytic nominal DS.
+
 ## Container base image
 
 The runtime image builds on the third-party image

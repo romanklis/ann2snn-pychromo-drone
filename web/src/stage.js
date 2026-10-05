@@ -5,6 +5,18 @@ import { colorOf, SHORT, DEFAULT_GOAL } from "./runparams.js";
 // never touch the layout, so the user's rotation can never be reset.
 let cameraInitialized = false;
 
+function droneVisible(name, opts) {
+  if (!opts.showDrone) return false;
+  const brains = opts.droneBrains;
+  return !brains || brains.includes(name);
+}
+
+function pathVisible(name, opts) {
+  if (!opts.showPath) return false;
+  const brains = opts.pathBrains;
+  return !brains || brains.includes(name);
+}
+
 function boxTrace(o) {
   const [cx, cy] = o.center || [0, 0];
   const [hx, hy] = o.half || [0.3, 0.3];
@@ -202,7 +214,8 @@ export function buildStage(div, report, selection, opts = {}) {
     traces.push({ type: "scatter3d", mode: "lines",
       x: res.trajectory.map((p) => p[0]), y: res.trajectory.map((p) => p[1]),
       z: res.trajectory.map((p) => p[2]),
-      name: SHORT[name] || name, line: { color: colorOf(name), width: 4 }, opacity: 0.85, hoverinfo: "name" });
+      name: SHORT[name] || name, line: { color: colorOf(name), width: 4 },
+      opacity: 0.85, hoverinfo: "name", visible: pathVisible(name, opts) });
     const last = Math.max(0, res.trajectory.length - 1);
     const pos = res.trajectory[last] || [0, 0, 0];
     const d = droneArrays(pos, res.attitude ? res.attitude[last] : [0, 0, 0], opts.droneScale || 1);
@@ -216,10 +229,10 @@ export function buildStage(div, report, selection, opts = {}) {
         marker: { color: colorOf(name), size: 4 }, showlegend: false, hoverinfo: "skip" },
       { type: "scatter3d", mode: "lines", x: d.x, y: d.y, z: d.z,
         line: { color: colorOf(name), width: 4 }, showlegend: false, hoverinfo: "skip",
-        visible: !!opts.showDrone },
+        visible: droneVisible(name, opts) },
       { type: "scatter3d", mode: "markers", x: d.rx, y: d.ry, z: d.rz,
         marker: { color: colorOf(name), size: 3 }, showlegend: false, hoverinfo: "skip",
-        visible: !!opts.showDrone },
+        visible: droneVisible(name, opts) },
     );
   }
   for (const name of report.controllers) {
@@ -249,12 +262,13 @@ export function buildStage(div, report, selection, opts = {}) {
     paper_bgcolor: "rgba(0,0,0,0)",
     font: { color: "#c9d1d9", size: 10 },
     showlegend: true,
-    legend: { orientation: "h", y: 0.02, x: 0.02, font: { size: 9 } },
+    legend: { orientation: "h", y: 0.99, yanchor: "top", x: 0.02, xanchor: "left",
+              font: { size: 9 }, bgcolor: "rgba(0,0,0,0)" },
     uirevision: "keep",
     scene: sceneLayout(div, opts),
   };
   Promise.resolve(Plotly.react(div, traces, layout, { displayModeBar: false, responsive: true }))
-    .then(() => updateStage(div, report, refs, null, opts));
+    .then(() => updateStage(div, report, refs, opts.markerIdx == null ? null : opts.markerIdx, opts));
   refs.selection = selection;
   return refs;
 }
@@ -278,8 +292,8 @@ export function updateStage(div, report, refs, markerIdx, opts = {}) {
     const pos = res.trajectory[i] || [0, 0, 0];
     add(refs.ctrl[name].marker, [pos[0]], [pos[1]], [pos[2]], true);
     const d = droneArrays(pos, res.attitude ? res.attitude[i] : [0, 0, 0], opts.droneScale || 1);
-    add(refs.ctrl[name].droneLines, d.x, d.y, d.z, !!opts.showDrone);
-    add(refs.ctrl[name].droneMarkers, d.rx, d.ry, d.rz, !!opts.showDrone);
+    add(refs.ctrl[name].droneLines, d.x, d.y, d.z, droneVisible(name, opts));
+    add(refs.ctrl[name].droneMarkers, d.rx, d.ry, d.rz, droneVisible(name, opts));
   }
   for (const name of Object.keys(refs.scan)) {
     const res = report.results[name];

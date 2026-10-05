@@ -167,21 +167,25 @@ class LosslessConnectomeSNN:
         x = np.asarray(x, dtype=np.float64).reshape(-1)
         i_input = self.w_in @ x
         motor = np.zeros(self.n_out, dtype=np.float64)
+        any_spike = np.zeros(self.n_neurons, dtype=np.float64)
         for _ in range(self.micro_steps):
             i_syn = i_input + self.rec.matvec(self.s)
             self.v = np.clip(self.v + i_syn, 0.0, None)   # non-negative membrane
             self.s = (self.v >= self.v_th).astype(np.float64)
             self.v = self.v - self.s * self.v_th          # soft reset
             motor += self.w_out @ self.s
-        self.last_spikes = self.s.astype(np.uint8)
+            any_spike = np.maximum(any_spike, self.s)     # fired at any micro-step
+        # record which neurons fired during the frame (not just the last micro-step)
+        self.last_spikes = any_spike.astype(np.uint8)
         return np.clip(motor / self.micro_steps, -self.limit, self.limit)
 
     def last_telemetry(self, dt: float = 0.02) -> Dict[str, float]:
-        rate_hz = float(np.mean(self.s)) * self.micro_steps / float(dt)
+        active = float(np.mean(self.last_spikes)) if self.last_spikes.size else 0.0
+        rate_hz = active * self.micro_steps / float(dt)
         return {
             "spike_rate_hz": rate_hz,
-            "active_frac": float(np.mean(self.s)),
-            "spikes_this_frame": float(np.sum(self.s)),
+            "active_frac": active,
+            "spikes_this_frame": float(np.sum(self.last_spikes)),
             "mean_v": float(np.mean(self.v)),
         }
 
@@ -247,6 +251,7 @@ class ConnectomeController:
         scene = (getattr(ref, "meta", None) or {}).get("scene")
         if scene is None:
             raise ValueError("the connectome controller needs ref.meta['scene']")
+        state = getattr(state, "state", state)
         features, ranges = policy_input_with_scan(
             state, ref, scene, self.estimator, self.task,
             sensor=self.sensor, rng=self._rng, pos_dim=3,

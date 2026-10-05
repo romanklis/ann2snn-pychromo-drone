@@ -149,7 +149,7 @@ class DSGuidanceController:
                 f"pos_dim={self.pos_dim} examples"
             )
         scene = _scene_of(ref, self.scene)
-        state = np.asarray(state, dtype=np.float64).reshape(-1)
+        state = np.asarray(getattr(state, "state", state), dtype=np.float64).reshape(-1)
         e = state[:3] - np.asarray(ref.pos, dtype=np.float64)
         edot = state[3:6] - np.asarray(ref.vel, dtype=np.float64)
         return self._core(e, edot, state[:3], scene)
@@ -196,7 +196,7 @@ class ClassicalPDController:
 
     def raw_act(self, state: np.ndarray, ref) -> np.ndarray:
         d = self.pos_dim
-        state = np.asarray(state, dtype=np.float64).reshape(-1)
+        state = np.asarray(getattr(state, "state", state), dtype=np.float64).reshape(-1)
         e = state[:d] - np.asarray(ref.pos, dtype=np.float64)[:d]
         edot = state[d:2 * d] - np.asarray(ref.vel, dtype=np.float64)[:d]
         accel = -(self.omega_n ** 2 * e + 2.0 * self.zeta * self.omega_n * edot)
