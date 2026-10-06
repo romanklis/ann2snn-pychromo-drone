@@ -84,3 +84,20 @@ def test_slam_closed_loop_smoke():
     assert res["metrics"]["collisions"] == 0
     assert res["slam"]["replans"] >= 1
     assert 0.0 <= res["slam"]["surface_coverage"] <= 1.0
+
+
+def test_replan_events_are_recorded_and_event_driven():
+    from drone6dof.benchmark import run_benchmark
+
+    r = run_benchmark(["field_ann"], steps=400, map_source="slam")
+    res = r["results"].get("field_ann")
+    if res is None:
+        pytest.skip("field bundle not available")
+    s = res["slam"]
+    steps = s["replan_steps"]
+    assert steps == sorted(steps)
+    assert all(0 <= v <= 400 for v in steps)
+    # event-driven + refresh~40: far fewer than a blind period-10 policy (~40+)
+    assert s["replans"] < 60, s["replans"]
+    assert s["goal_replans"] + s["frontier_replans"] == s["replans"]
+    assert res["metrics"]["collisions"] == 0

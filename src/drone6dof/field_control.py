@@ -114,6 +114,8 @@ class FieldDSController:
         self._tracker = None
         self._tracker_goal = None
         self._frame = 0
+        self._last_plan_frame = -10**9
+        self._min_replan_gap = 5
 
     def _make_tracker(self, scene, goal, start, way=None) -> PathTracker:
         g = self.guidance
@@ -124,27 +126,66 @@ class FieldDSController:
             planner_config=self.planner_config,
         )
 
+    @staticmethod
+    def _path_blocked(map_, waypoints, stride) -> bool:
+        """True if any sampled current waypoint is inside a **known** obstacle.
+
+        Unknown space does not invalidate a path (the planner is conservative
+        only when searching); only newly-observed obstacles do.
+        """
+        if not waypoints:
+            return False
+        blocked = map_.blocked(map_.cfg.inflate, conservative=False)
+        xs, ys = map_.xs, map_.ys
+        ni, nj = blocked.shape
+        for x, y in list(waypoints)[::max(1, int(stride))]:
+            i = int(round((float(x) - xs[0]) / map_.cfg.res))
+            j = int(round((float(y) - ys[0]) / map_.cfg.res))
+            if 0 <= i < ni and 0 <= j < nj and blocked[i, j]:
+                return True
+        return False
+
     def _ensure_tracker(self, scene, goal, start, map_=None) -> None:
         goal = np.asarray(goal, dtype=np.float64).reshape(3)
         if map_ is not None:
-            period = max(1, int(getattr(map_.cfg, "replan_period", 10)))
+            refresh = max(1, int(getattr(map_.cfg, "refresh", 40)))
+            stride = max(1, int(getattr(map_.cfg, "path_check_stride", 2)))
+            gap = self._frame - self._last_plan_frame
             fresh = self._tracker is None or not np.allclose(self._tracker_goal, goal)
-            if fresh or (self._frame % period == 0):
+            due = gap >= refresh
+            invalid = (self._tracker is not None and gap >= self._min_replan_gap
+                       and self._frame % 5 == 0
+                       and self._path_blocked(map_, self._tracker.waypoints, stride))
+            if fresh or due or invalid:
                 way = map_.plan(start[:2], goal[:2])
-                if way is not None:
-                    if map_.path_found_step is None:
-                        map_.path_found_step = int(self._frame)
-                else:
+                kind = "goal"
+                if way is None:
                     frontier = map_.nearest_frontier(goal[:2])
                     way = map_.plan(start[:2], frontier) if frontier is not None else None
-                    if way is None and self._tracker is not None:
-                        self._frame += 1
-                        return            # keep the previous route
-                if self._tracker is None:
-                    self._tracker = self._make_tracker(scene, goal, start, way=way)
-                else:
-                    self._tracker.set_path(way, start=start)
-                self._tracker_goal = goal.copy()
+                    kind = "frontier"
+                if way is not None:
+                    map_.replan_steps.append(int(self._frame))
+                    if kind == "goal":
+                        map_.goal_replans += 1
+                        if map_.path_found_step is None:
+                            map_.path_found_step = int(self._frame)
+                    else:
+                        map_.frontier_replans += 1
+                    if self._tracker is None:
+                        self._tracker = self._make_tracker(scene, goal, start, way=way)
+                    else:
+                        self._tracker.set_path(way, start=start)
+                    self._tracker_goal = goal.copy()
+                elif self._tracker is None:
+                    # no map route yet and nothing to track: go straight (the
+                    # learned field is the safety layer).  Never fall back to the
+                    # privileged scene planner while a map is in use.
+                    straight = [(float(start[0]), float(start[1])),
+                                (float(goal[0]), float(goal[1]))]
+                    self._tracker = self._make_tracker(scene, goal, start, way=straight)
+                    self._tracker_goal = goal.copy()
+                # throttle attempts regardless of success
+                self._last_plan_frame = self._frame
             self._frame += 1
             return
         if self._tracker is not None and np.allclose(self._tracker_goal, goal):

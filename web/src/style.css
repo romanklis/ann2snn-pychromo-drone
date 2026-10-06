@@ -78,9 +78,16 @@ button:hover { border-color: var(--accent); }
 .status.bad { color: #ff8a8a; }
 .status.busy { color: var(--muted); }
 
-main { display: grid; grid-template-columns: 1fr 460px; flex: 1; min-height: 0; }
-.stage { min-height: 0; border-right: 1px solid var(--line); }
+main { display: grid; grid-template-columns: minmax(230px, 20%) minmax(0, 1fr) minmax(300px, 26%); flex: 1; min-height: 0; }
+.stage { min-height: 0; }
 .side { padding: 8px; overflow: auto; display: flex; flex-direction: column; gap: 8px; }
+.side.left { border-right: 1px solid var(--line); }
+.side.right { border-left: 1px solid var(--line); }
+@media (max-width: 1200px) {
+  main { grid-template-columns: 1fr; }
+  .side { flex-direction: row; flex-wrap: wrap; }
+  .side.left, .side.right { border: 0; }
+}
 
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
 .card h3 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); font-weight: 600; }
@@ -94,7 +101,10 @@ canvas#raster { width: 100%; background: #0b0f14; border-radius: 4px; display: b
 .node { padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px; background: #0e141d; }
 .arrow { color: var(--accent); }
 .pipe-note { margin-top: 6px; color: var(--muted); font-size: 11px; }
-#slam-map { width: 100%; height: auto; display: block; border: 1px solid var(--line); border-radius: 6px; background: #0b1017; image-rendering: pixelated; margin-bottom: 6px; }
+#slam-map { width: 100%; height: auto; display: block; border: 1px solid var(--line); border-radius: 6px; background: #0b1017; image-rendering: pixelated; }
+#slam-timeline { width: 100%; height: auto; display: block; margin-top: 4px; border: 1px solid var(--line); border-radius: 4px; background: #0b1017; }
+.legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11px; color: var(--muted); margin: 6px 0; }
+.legend .sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; margin-right: 3px; vertical-align: middle; }
 .dim { color: var(--muted); }
 
 .resultbar { position: relative; z-index: 1; border-top: 1px solid var(--line); background: var(--panel2); padding: 6px 14px; }

@@ -21,6 +21,38 @@ def _names():
     return ["ds_guidance", "pid"] + (["ann", "snn"] if _HAS_WEIGHTS else [])
 
 
+def test_window_trims_series_and_recomputes_metrics():
+    full = run_benchmark(["ds_guidance"], steps=200)
+    win = run_benchmark(["ds_guidance"], steps=200, from_s=1.0, to_s=2.0)
+    f = full["results"]["ds_guidance"]
+    w = win["results"]["ds_guidance"]
+    assert 0 < len(w["t"]) < len(f["t"])
+    assert w["t"][0] == pytest.approx(1.0, abs=0.05)
+    assert w["t"][-1] == pytest.approx(2.0, abs=0.05)
+    # every per-frame series is the same trimmed length
+    for key in ("trajectory", "state", "attitude", "command", "goal_dist", "clearance", "success"):
+        assert len(w[key]) == len(w["t"])
+    # metrics recomputed over the window
+    assert w["metrics"]["steps"] == len(w["t"]) - 1
+    assert w["metrics"]["clearance_min_m"] == pytest.approx(float(np.min(w["clearance"])))
+    assert win["window"]["from"] == pytest.approx(1.0)
+    assert win["window"]["to"] == pytest.approx(2.0)
+
+
+def test_to_caps_the_simulation_steps():
+    capped = run_benchmark(["ds_guidance"], steps=500, to_s=2.0)
+    res = capped["results"]["ds_guidance"]
+    assert len(res["t"]) <= int(2.0 / 0.02) + 3
+    assert capped["steps"] <= 500
+
+
+def test_window_to_only_starts_at_zero():
+    win = run_benchmark(["ds_guidance"], steps=200, to_s=1.5)
+    w = win["results"]["ds_guidance"]
+    assert w["t"][0] == pytest.approx(0.0, abs=1e-9)
+    assert w["t"][-1] == pytest.approx(1.5, abs=0.05)
+
+
 def test_report_shapes_and_keys():
     report = run_benchmark(_names(), steps=20)
     assert report["example"] == "quad6dof"

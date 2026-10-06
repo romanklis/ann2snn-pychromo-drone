@@ -64,18 +64,7 @@
     </header>
 
     <main>
-      <section id="stage" class="stage"></section>
-      <aside class="side">
-        <div class="card">
-          <h3>SLAM map · what the drone knows <span id="slam-note" class="note"></span></h3>
-          <canvas id="slam-map" width="320" height="320"></canvas>
-          <div id="slam-metrics" class="pipeline"></div>
-          <div id="slam-pipe" class="pipeline"></div>
-        </div>
-        <div class="card">
-          <h3>Spike activity <span id="raster-note" class="note"></span></h3>
-          <canvas id="raster" width="640" height="180"></canvas>
-        </div>
+      <aside class="side left">
         <div class="card">
           <h3>Control output ‖u‖ (m/s²)</h3>
           <div id="ctrl-chart" class="chart"></div>
@@ -87,6 +76,25 @@
         <div class="card">
           <h3>Safety · clearance (m)</h3>
           <div id="clear-chart" class="chart"></div>
+        </div>
+      </aside>
+      <section id="stage" class="stage"></section>
+      <aside class="side right">
+        <div class="card">
+          <h3>SLAM map · what the drone knows <span id="slam-note" class="note"></span></h3>
+          <div class="goal" style="margin-bottom:6px">
+            <span class="goal-label">brain</span>
+            <select id="slam-brain" class="goal-input" style="width:auto" title="which brain's map to show"></select>
+          </div>
+          <canvas id="slam-map" width="320" height="320"></canvas>
+          <canvas id="slam-timeline" width="320" height="26" title="replanning events"></canvas>
+          <div id="slam-legend" class="pipeline legend"></div>
+          <div id="slam-metrics" class="pipeline"></div>
+          <div id="slam-pipe" class="pipeline"></div>
+        </div>
+        <div class="card">
+          <h3>Spike activity <span id="raster-note" class="note"></span></h3>
+          <canvas id="raster" width="640" height="180"></canvas>
         </div>
       </aside>
     </main>

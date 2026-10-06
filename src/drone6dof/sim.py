@@ -286,23 +286,23 @@ class Simulation:
     def trajectory(self) -> np.ndarray:
         return np.asarray(self.history["state"], dtype=np.float64)
 
-    def metrics(self) -> dict:
-        traj = self.trajectory()
+    def metrics(self, start: int = 0, stop: Optional[int] = None) -> dict:
+        traj = self.trajectory()[int(start):stop]
         clearances = self.scene.clearance_series(traj)
         goal = self.scene.goal_np
         goal_dists = np.linalg.norm(traj[:, :3] - goal, axis=1)
-        tele = self.history["telemetry"]
+        tele = self.history["telemetry"][int(start):stop]
         g_forces = [t.get("g_force", float("nan")) for t in tele]
         soc = [t.get("soc_pct", float("nan")) for t in tele]
         latencies = [t.get("latency_ms") for t in tele if t.get("latency_ms") is not None]
         rates = [t.get("spike_rate_hz") for t in tele if t.get("spike_rate_hz") is not None]
         step_dists = np.linalg.norm(np.diff(traj[:, :3], axis=0), axis=1) if len(traj) > 1 else np.zeros(0)
-        cmd = np.asarray(self.history["command"], dtype=np.float64)
+        cmd = np.asarray(self.history["command"][int(start):stop], dtype=np.float64)
         smooth = (np.linalg.norm(np.diff(cmd, axis=0), axis=1)
                   if len(cmd) > 1 else np.zeros(0))
         out = {
             "controller": getattr(self.controller, "name", "controller"),
-            "steps": int(self.k),
+            "steps": int(max(0, len(traj) - 1)),
             "clearance_min_m": float(clearances.min()) if len(clearances) else float("nan"),
             "collisions": int(np.sum(clearances < 0.0)),
             "reached_goal": bool(goal_dists[-1] <= self.task.goal_tolerance)

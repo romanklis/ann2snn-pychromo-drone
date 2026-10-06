@@ -213,9 +213,14 @@ def run_controller(
     weights_path=None,
     seed: int = 0,
     map_source: str = MAP_SOURCE_DEFAULT,
+    from_s: Optional[float] = None,
+    to_s: Optional[float] = None,
 ) -> dict:
     from .cli import make_controller  # local import avoids an import cycle at module load
 
+    # Only the structured field arms consume the map; running SLAM for the other
+    # controllers just doubles the cost and the payload, so they stay on truth.
+    use_slam = map_source == "slam" and name in ("field_ann", "field_snn")
     backend = NumpyPlantBackend(QuadParams(), heading_target=scene.goal_np)
     controller = make_controller(name, scene, control_limit, weights_path)
     sim = Simulation(
@@ -227,16 +232,29 @@ def run_controller(
         gain=gain,
         control_limit=control_limit,
         initial_state=INIT_STATE,
-        map_source=map_source,
+        map_source=("slam" if use_slam else "truth"),
     )
     sim.run()
     history = sim.history
     state = np.asarray(history["state"], dtype=np.float64)
-    metrics = sim.metrics()
+    total = len(state)
+
+    # ---- optional hidden window [from_s, to_s] seconds --------------------- #
+    i0 = 0
+    i1 = total
+    if from_s is not None:
+        i0 = int(max(0, min(total, round(float(from_s) / dt))))
+    if to_s is not None and total:
+        i1 = int(max(i0 + 1, min(total, math.ceil(float(to_s) / dt) + 1)))
+    i1 = max(i0, min(i1, total))
+
+    metrics = sim.metrics(i0, i1)
     if history["estimate"]:
-        err = np.asarray(history["est_error"], dtype=np.float64)
+        err = np.asarray(history["est_error"], dtype=np.float64)[i0:i1]
         metrics = dict(metrics)
-        metrics["pos_rmse_m"] = float(np.sqrt(np.mean(np.sum(err ** 2, axis=1))))
+        metrics["pos_rmse_m"] = (
+            float(np.sqrt(np.mean(np.sum(err ** 2, axis=1)))) if len(err) else float("nan")
+        )
 
     spikes = None
     if any(s is not None for s in history["spikes"]):
@@ -244,6 +262,7 @@ def run_controller(
         for i, frame in enumerate(history["spikes"]):
             if frame is not None:
                 spikes[i, : len(frame)] = frame
+        spikes = spikes[i0:i1]
 
     scan = None
     frames = history["scan"]
@@ -253,28 +272,39 @@ def run_controller(
         for i, frame in enumerate(frames):
             if frame is not None:
                 scan[i] = frame
+        scan = scan[i0:i1]
     angles = getattr(controller, "scan_angles", None)
+
+    telemetry = _telemetry_matrix(history)
+    telemetry = {key: vals[i0:i1] for key, vals in telemetry.items()}
 
     map_payload = None
     slam_payload = None
     if sim.slam_map is not None:
-        frames = history.get("map_frames") or []
-        shape = [len(frames[0]), len(frames[0][0])] if frames else [0, 0]
+        mf = history.get("map_frames") or []
+        mt = [float(t) for t in history.get("map_times", [])]
+        shape = [len(mf[0]), len(mf[0][0])] if mf else [0, 0]
+        keep = [k for k, t in enumerate(mt) if (i0 * dt - 1e-9) <= t <= (i1 - 1) * dt + 1e-6]
         map_payload = {
             "shape": shape,
             "bounds": [float(v) for v in sim.slam_map.cfg.bounds],
-            "times": [float(t) for t in history.get("map_times", [])],
-            "frames": frames,
+            "times": [mt[k] for k in keep],
+            "frames": [mf[k] for k in keep],
         }
-        m = metrics
+        steps_written = sim.slam_map.replan_steps
+        shifted = [int(s) - i0 for s in steps_written if i0 <= s < i1]
+        found = sim.slam_map.path_found_step
         slam_payload = {
-            "explored_frac": [float(v) for v in history.get("slam_explored", [])],
-            "entropy_bits": [float(v) for v in history.get("slam_entropy", [])],
-            "occupied_cells": [int(v) for v in history.get("slam_occupied", [])],
+            "explored_frac": [float(v) for v in history.get("slam_explored", [])[i0:i1]],
+            "entropy_bits": [float(v) for v in history.get("slam_entropy", [])[i0:i1]],
+            "occupied_cells": [int(v) for v in history.get("slam_occupied", [])[i0:i1]],
             "replans": int(sim.slam_map.replans),
-            "path_found_step": m.get("slam_path_found_step", -1),
-            "iou_vs_truth": m.get("slam_iou_vs_truth", 0.0),
-            "surface_coverage": _surface_coverage(scene, sim.slam_map, state[:, :2]),
+            "goal_replans": int(sim.slam_map.goal_replans),
+            "frontier_replans": int(sim.slam_map.frontier_replans),
+            "replan_steps": shifted,
+            "path_found_step": (int(found) - i0 if found is not None and found >= i0 else -1),
+            "iou_vs_truth": metrics.get("slam_iou_vs_truth", 0.0),
+            "surface_coverage": _surface_coverage(scene, sim.slam_map, state[i0:i1, :2]),
         }
 
     label = dict(CONTROLLERS).get(name, name)
@@ -284,24 +314,27 @@ def run_controller(
         "spiking": _META[name]["spiking"],
         "sensor": _META[name]["sensor"],
         "recurrent": _META[name]["recurrent"],
-        "t": [float(k * dt) for k in range(len(state))],
-        "trajectory": state[:, :3].tolist(),
-        "state": state.tolist(),
-        "attitude": np.asarray(history["rpy"], dtype=np.float64).tolist(),
-        "command": np.asarray(history["command"], dtype=np.float64).tolist(),
-        "goal_dist": [float(v) for v in history["goal_dist"]],
-        "clearance": [float(v) for v in history["clearance"]],
-        "success": [bool(v) for v in (scene.clearance_series(state) >= 0.0)],
-        "telemetry": _telemetry_matrix(history),
+        "t": [float(k * dt) for k in range(i0, i1)],
+        "trajectory": state[i0:i1, :3].tolist(),
+        "state": state[i0:i1].tolist(),
+        "attitude": np.asarray(history["rpy"], dtype=np.float64)[i0:i1].tolist(),
+        "command": np.asarray(history["command"], dtype=np.float64)[i0:i1].tolist(),
+        "goal_dist": [float(v) for v in history["goal_dist"][i0:i1]],
+        "clearance": [float(v) for v in history["clearance"][i0:i1]],
+        "success": [bool(v) for v in (scene.clearance_series(state) >= 0.0)[i0:i1]],
+        "telemetry": telemetry,
         "spikes": None if spikes is None else spikes.tolist(),
         "scan": None if scan is None else np.round(scan, 3).tolist(),
         "scan_angles": None if (scan is None or angles is None) else [float(a) for a in angles],
         "estimate": None if not history["estimate"] else np.round(
-            np.asarray(history["estimate"], dtype=np.float64), 3
+            np.asarray(history["estimate"], dtype=np.float64)[i0:i1], 3
         ).tolist(),
         "metrics": metrics,
         "map": map_payload,
         "slam": slam_payload,
+        "window": {"i0": int(i0), "i1": int(i1),
+                   "from": float(i0 * dt),
+                   "to": float((i1 - 1) * dt) if i1 > i0 else 0.0},
     }
 
 
@@ -317,19 +350,26 @@ def run_benchmark(
     goal: Optional[Sequence[float]] = None,
     scene_name: Optional[str] = None,
     map_source: str = MAP_SOURCE_DEFAULT,
+    from_s: Optional[float] = None,
+    to_s: Optional[float] = None,
 ) -> dict:
     """Run each requested controller on one scene and return the full report.
 
     ``goal`` overrides the shipped goal (interactive command); ``scene_name``
     selects a named obstacle preset (``pillar``, ``boxes``, ``wall``, ``slalom``);
     ``map_source`` is ``"truth"`` (privileged scene) or ``"slam"`` (online map).
-    Raises ``ValueError`` for a malformed goal or unknown scene.
+    ``from_s``/``to_s`` (seconds) trim the report to that window and cap the
+    simulation to ``to_s``.  Raises ``ValueError`` for a malformed goal or unknown
+    scene.
     """
     requested = list(names) if names else [name for name, _ in CONTROLLERS]
     known = {name for name, _ in CONTROLLERS}
     unknown = [n for n in requested if n not in known]
     if unknown:
         raise KeyError(f"unknown controllers: {', '.join(unknown)}")
+
+    if to_s is not None:
+        steps = int(min(int(steps), max(1, math.ceil(float(to_s) / dt) + 1)))
 
     scene = preset_scene(scene_name, goal=goal)
     available = available_controllers(weights_path)
@@ -343,7 +383,7 @@ def run_benchmark(
         results[name] = run_controller(
             name, scene, steps=steps, dt=dt, gain=gain,
             control_limit=control_limit, weights_path=weights_path, seed=seed,
-            map_source=map_source,
+            map_source=map_source, from_s=from_s, to_s=to_s,
         )
 
     per_controller = {
@@ -382,6 +422,10 @@ def run_benchmark(
         "dt": float(dt),
         "seed": int(seed),
         "map_source": str(map_source),
+        "window": {
+            "from": None if from_s is None else float(from_s),
+            "to": None if to_s is None else float(to_s),
+        },
         "controllers": [n for n in requested if n in results],
         "unavailable": unavailable,
         "results": results,

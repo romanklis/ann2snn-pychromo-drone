@@ -241,6 +241,9 @@ def plan_path_grid(
     goal = _cell(goal_xy, xs, ys)
     if not _in_bounds(start, blocked.shape) or not _in_bounds(goal, blocked.shape):
         return None
+    # A blocked/unknown goal is snapped to the nearest free cell: this keeps a
+    # continuous, safe route toward the goal (the drone advances along known-free
+    # space and discovers more) instead of stalling or flying a straight line.
     start_free = _nearest_free(blocked, start)
     goal_free = _nearest_free(blocked, goal)
     if start_free is None or goal_free is None:

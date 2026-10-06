@@ -77,3 +77,19 @@ export function writeScene(name) {
   const query = p.toString();
   window.history.replaceState(null, "", query ? `?${query}` : window.location.pathname);
 }
+
+// -- hidden trim window (seconds), e.g. ?from=1.0&to=4.0 --------------------- //
+// Intentionally not exposed in the UI: it lives only in the URL and trims the
+// report (paths, plots, playback) to [from, to].
+export function readWindow() {
+  const p = new URLSearchParams(window.location.search);
+  const fromRaw = p.get("from");
+  const toRaw = p.get("to");
+  if (fromRaw === null && toRaw === null) return null;
+  const from = fromRaw === null ? null : Number(fromRaw);
+  const to = toRaw === null ? null : Number(toRaw);
+  if (from !== null && (!Number.isFinite(from) || from < 0)) return null;
+  if (to !== null && (!Number.isFinite(to) || to <= 0)) return null;
+  if (from !== null && to !== null && to <= from) return null;
+  return { from, to };
+}

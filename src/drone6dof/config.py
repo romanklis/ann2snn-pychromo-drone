@@ -94,9 +94,10 @@ SLAM = {
     "occ_thresh": 0.6,
     "free_thresh": 0.4,
     "inflate": 0.30,
-    "replan_period": 10,
-    "viz_stride": 10,
-    "viz_shape": 40,
+    "refresh": 40,
+    "path_check_stride": 2,
+    "viz_stride": 20,
+    "viz_shape": 32,
 }
 #: default map source: "truth" keeps the shipped behaviour; "slam" uses the mapper
 MAP_SOURCE_DEFAULT = "truth"

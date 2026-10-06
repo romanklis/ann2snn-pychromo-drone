@@ -140,7 +140,7 @@ function emptyMarkers(color, size) {
     marker: { color, size }, showlegend: false, hoverinfo: "skip" };
 }
 
-function sceneLayout(div, opts = {}) {
+function sceneLayout(div, opts = {}, fresh = false) {
   const scene = {
     xaxis: { title: "x", gridcolor: "#22303c", zerolinecolor: "#22303c", range: [-2.6, 2.6] },
     yaxis: { title: "y", gridcolor: "#22303c", zerolinecolor: "#22303c", range: [-2.6, 2.6] },
@@ -150,20 +150,22 @@ function sceneLayout(div, opts = {}) {
     bgcolor: "rgba(0,0,0,0)",
   };
   // Carry the user's current camera into a rebuild (selection/scene/goal change),
-  // so toggling a controller never resets the view. Falls back to the default eye
-  // on the very first build.
+  // so toggling a controller never resets the view.  A scene *change* starts from
+  // the default camera instead.
   let cam = null;
-  try {
-    const live = div && div._fullLayout && div._fullLayout.scene && div._fullLayout.scene.camera;
-    if (live && live.eye && live.eye.x != null) {
-      cam = {
-        eye: { x: live.eye.x, y: live.eye.y, z: live.eye.z },
-        center: live.center ? { x: live.center.x, y: live.center.y, z: live.center.z } : { x: 0, y: 0, z: 0 },
-        up: live.up ? { x: live.up.x, y: live.up.y, z: live.up.z } : { x: 0, y: 0, z: 1 },
-      };
+  if (!fresh) {
+    try {
+      const live = div && div._fullLayout && div._fullLayout.scene && div._fullLayout.scene.camera;
+      if (live && live.eye && live.eye.x != null) {
+        cam = {
+          eye: { x: live.eye.x, y: live.eye.y, z: live.eye.z },
+          center: live.center ? { x: live.center.x, y: live.center.y, z: live.center.z } : { x: 0, y: 0, z: 0 },
+          up: live.up ? { x: live.up.x, y: live.up.y, z: live.up.z } : { x: 0, y: 0, z: 1 },
+        };
+      }
+    } catch (err) {
+      cam = null;
     }
-  } catch (err) {
-    cam = null;
   }
   if (!cam && opts.camera && opts.camera.eye) cam = opts.camera;
   if (!cam && !cameraInitialized) cam = { eye: { x: 1.5, y: -1.6, z: 0.9 }, up: { x: 0, y: 0, z: 1 } };
@@ -257,6 +259,13 @@ export function buildStage(div, report, selection, opts = {}) {
     );
   }
 
+  // A scene change must fully redraw the 3-D scene (different obstacles), while
+  // selection/View/goal changes keep the user's camera.  Key uirevision on the
+  // scene and use newPlot on a scene change so Plotly cannot keep stale traces.
+  const sceneKey = report.scene_name || "pillar";
+  const sceneChanged = div.dataset.sceneKey !== undefined && div.dataset.sceneKey !== sceneKey;
+  div.dataset.sceneKey = sceneKey;
+
   const layout = {
     margin: { l: 0, r: 0, t: 0, b: 0 },
     paper_bgcolor: "rgba(0,0,0,0)",
@@ -264,10 +273,11 @@ export function buildStage(div, report, selection, opts = {}) {
     showlegend: true,
     legend: { orientation: "h", y: 0.99, yanchor: "top", x: 0.02, xanchor: "left",
               font: { size: 9 }, bgcolor: "rgba(0,0,0,0)" },
-    uirevision: "keep",
-    scene: sceneLayout(div, opts),
+    uirevision: `scene:${sceneKey}`,
+    scene: sceneLayout(div, opts, sceneChanged),
   };
-  Promise.resolve(Plotly.react(div, traces, layout, { displayModeBar: false, responsive: true }))
+  const draw = sceneChanged ? Plotly.newPlot : Plotly.react;
+  Promise.resolve(draw(div, traces, layout, { displayModeBar: false, responsive: true }))
     .then(() => updateStage(div, report, refs, opts.markerIdx == null ? null : opts.markerIdx, opts));
   refs.selection = selection;
   return refs;

@@ -252,15 +252,24 @@ status: [docs/field.md §8](docs/field.md#8-measured-result) and
 
 ## SLAM-lite map (dashboard)
 
-The hero dashboard's right column shows **"SLAM map · what the drone knows"**:
-an occupancy grid built online from the LiDAR + the UKF pose, drawn top-down with
-the ground-truth obstacle outline overlaid, plus live metrics (explored %,
-surface coverage, IoU, replans, first goal-path frame). A header **map** selector
-switches between `SLAM` (the live map) and `truth` (the privileged scene). Under
-SLAM the A\* planner consumes the live map, replans, and visits frontiers until a
-goal route appears. On the four preset scenes the map-based runs stay
-collision-free and reach the goal; see [docs/slam.md](docs/slam.md). `POST
-/api/benchmark` accepts `"map_source": "truth" | "slam"`.
+The hero dashboard is three columns: **left** telemetry charts (‖u‖, goal
+distance, clearance), **centre** the 3-D view, **right** the **"SLAM map · what
+the drone knows"** panel plus the spike raster. The map is drawn top-down (grey
+unknown / dark free / amber occupied) with the ground-truth obstacle outline
+overlaid and the trajectory in the owning brain's colour; **replanning events**
+are marked on the trajectory and on a timeline strip, and light up when the
+playback cursor passes them. Metrics: explored %, surface coverage, IoU (secondary
+tooltip), replans + last time. A header **map** selector switches `SLAM`⇄`truth`.
+Under SLAM the A\* planner consumes the live map with **event-driven** replanning
+(path invalidation / goal change / slow refresh) and a frontier fallback; on the
+four preset scenes the map-based runs stay collision-free and reach the goal. See
+[docs/slam.md](docs/slam.md). `POST /api/benchmark` accepts
+`"map_source": "truth" | "slam"`.
+
+A **hidden** URL window `?from=<s>&to=<s>` (no UI control, combined with the
+existing `gx/gy/gz/scene` params) trims the whole run to that time range: every
+path, plot and the playback are sliced server-side, metrics are recomputed, and
+the simulation is capped at `to` so it is not simulated past the window.
 
 ## Weights and training
 

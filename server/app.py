@@ -6,6 +6,7 @@ Data-only: the 3-D visualization stays in PyChrono (`make demo`).  Run with
 
 from __future__ import annotations
 
+import math
 import os
 from pathlib import Path
 
@@ -40,6 +41,19 @@ def _clamp_steps(value) -> int:
     except (TypeError, ValueError):
         steps = STEPS
     return max(1, min(MAX_STEPS, steps))
+
+
+def _clamp_window(value, name: str):
+    """Parse an optional hidden trim bound in seconds (``None`` if absent)."""
+    if value is None or value == "":
+        return None
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"'{name}' must be a number")
+    if not math.isfinite(seconds) or seconds < 0.0:
+        raise ValueError(f"'{name}' must be a finite number >= 0")
+    return seconds
 
 
 def create_app() -> Flask:
@@ -92,9 +106,13 @@ def create_app() -> Flask:
         map_source = payload.get("map_source", MAP_SOURCE_DEFAULT)
         if map_source not in ("truth", "slam"):
             raise ValueError("map_source must be 'truth' or 'slam'")
+        from_s = _clamp_window(payload.get("from"), "from")
+        to_s = _clamp_window(payload.get("to"), "to")
+        if from_s is not None and to_s is not None and to_s <= from_s:
+            raise ValueError("'to' must be greater than 'from'")
         return run_benchmark(
             names, steps=steps, seed=seed, goal=goal, scene_name=scene_name,
-            map_source=map_source,
+            map_source=map_source, from_s=from_s, to_s=to_s,
         )
 
     @app.post("/api/simulate")

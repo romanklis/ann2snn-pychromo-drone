@@ -55,6 +55,30 @@ def test_benchmark_rejects_bad_map_source(client):
     assert r.status_code == 400
 
 
+def test_benchmark_window_is_applied(client):
+    r = client.post(
+        "/api/benchmark",
+        json={"controllers": ["ds_guidance"], "steps": 200, "from": 1.0, "to": 2.0},
+    )
+    assert r.status_code == 200
+    body = r.get_json()
+    res = body["results"]["ds_guidance"]
+    assert body["window"] == {"from": 1.0, "to": 2.0}
+    assert abs(res["t"][0] - 1.0) < 0.05
+    assert abs(res["t"][-1] - 2.0) < 0.05
+
+
+def test_benchmark_bad_window_is_400(client):
+    assert client.post(
+        "/api/benchmark",
+        json={"controllers": ["ds_guidance"], "steps": 50, "from": 2.0, "to": 1.0},
+    ).status_code == 400
+    assert client.post(
+        "/api/benchmark",
+        json={"controllers": ["ds_guidance"], "from": "abc"},
+    ).status_code == 400
+
+
 def test_benchmark_slam_includes_map(client):
     r = client.post(
         "/api/benchmark",
@@ -70,6 +94,9 @@ def test_benchmark_slam_includes_map(client):
     assert res["map"] is not None and res["slam"] is not None
     assert len(res["map"]["shape"]) == 2
     assert 0.0 <= res["slam"]["surface_coverage"] <= 1.0
+    steps = res["slam"]["replan_steps"]
+    assert steps == sorted(steps)
+    assert all(isinstance(v, int) and 0 <= v <= 60 for v in steps)
 
 
 def test_benchmark_runs_selected_controllers(client):

@@ -35,9 +35,10 @@ class SlamConfig:
     occ_thresh: float = 0.6
     free_thresh: float = 0.4
     inflate: float = 0.30
-    replan_period: int = 10
-    viz_stride: int = 10
-    viz_shape: int = 40
+    refresh: int = 40
+    path_check_stride: int = 2
+    viz_stride: int = 20
+    viz_shape: int = 32
 
     def to_dict(self) -> dict:
         return {
@@ -48,7 +49,8 @@ class SlamConfig:
             "occ_thresh": float(self.occ_thresh),
             "free_thresh": float(self.free_thresh),
             "inflate": float(self.inflate),
-            "replan_period": int(self.replan_period),
+            "refresh": int(self.refresh),
+            "path_check_stride": int(self.path_check_stride),
             "viz_stride": int(self.viz_stride), "viz_shape": int(self.viz_shape),
         }
 
@@ -75,6 +77,9 @@ class OccupancyMap:
         self.log_odds = np.zeros((len(self.xs), len(self.ys)), dtype=np.float64)
         # bookkeeping for the report
         self.replans = 0
+        self.goal_replans = 0
+        self.frontier_replans = 0
+        self.replan_steps: list = []
         self.updates = 0
         self.r_max = 3.0
         self.path_found_step: Optional[int] = None

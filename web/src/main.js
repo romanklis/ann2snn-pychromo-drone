@@ -1,7 +1,7 @@
 import { getControllers, getHealth, runBenchmark } from "./api.js";
-import { DEFAULT_SELECTION, SHORT, colorOf, DEFAULT_GOAL, readGoal, writeGoal, goalError, readScene, writeScene } from "./runparams.js";
+import { DEFAULT_SELECTION, SHORT, colorOf, DEFAULT_GOAL, readGoal, writeGoal, goalError, readScene, writeScene, readWindow } from "./runparams.js";
 import { buildStage, updateStage } from "./stage.js";
-import { drawSlamMap, firstSlamResult } from "./slamviz.js";
+import { drawSlamMap, drawSlamTimeline, firstSlamResult, slamTargets } from "./slamviz.js";
 import { drawRasters, activeChannelCount } from "./raster.js";
 import { lineChart, setCursor } from "./chart.js";
 
@@ -26,6 +26,9 @@ const state = {
   rasterChannels: 200,
   lastStageMs: 0,
   mapSource: "slam",
+  slamBrain: null,
+  trim: readWindow(),
+  dt: 0.02,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -34,6 +37,7 @@ let stageRefs = null;
 async function boot() {
   try {
     const [health, cat] = await Promise.all([getHealth(), getControllers()]);
+    state.dt = (cat.defaults && cat.defaults.dt) || 0.02;
     renderBadges(health, cat);
     buildPicker(cat);
     buildSceneSelect(cat.scenes);
@@ -164,12 +168,20 @@ async function refresh() {
   try {
     // A custom goal is farther from the start, so give it a longer horizon
     // (16 s) to settle; the shipped goal keeps the canonical 10 s episode.
+    let steps = state.goal ? 800 : state.steps;
+    // Hidden trim window (?from=&to=): cap the simulation at `to` so we do not
+    // simulate past the window; the server trims all series/metrics to it.
+    if (state.trim && state.trim.to != null) {
+      steps = Math.min(steps, Math.ceil(state.trim.to / (state.dt || 0.02)) + 1);
+    }
     report = await runBenchmark(state.selection, {
-      steps: state.goal ? 800 : state.steps,
+      steps,
       seed: state.seed,
       goal: state.goal,
       scene: state.scene,
       mapSource: state.mapSource,
+      from: state.trim ? state.trim.from : null,
+      to: state.trim ? state.trim.to : null,
     });
   } catch (err) {
     $("resultbar").textContent = `benchmark failed: ${err.message}`;
@@ -388,12 +400,44 @@ function buildMapSourceSelect() {
   });
 }
 
+function syncSlamBrain(r) {
+  const sel = $("slam-brain");
+  if (!sel) return null;
+  const targets = slamTargets(r);
+  sel.innerHTML = targets.map((n) => `<option value="${n}">${SHORT[n] || n}</option>`).join("");
+  if (!targets.includes(state.slamBrain)) {
+    state.slamBrain = targets.includes("field_snn") ? "field_snn"
+      : (targets.includes("field_ann") ? "field_ann" : (targets[0] || null));
+  }
+  sel.value = state.slamBrain || "";
+  sel.disabled = targets.length <= 1;
+  if (!sel.dataset.bound) {
+    sel.dataset.bound = "1";
+    sel.addEventListener("change", () => {
+      state.slamBrain = sel.value;
+      renderSlam();
+    });
+  }
+  return state.slamBrain;
+}
+
 function renderSlam() {
   const r = state.report;
-  const res = r ? firstSlamResult(r) : null;
+  const name = r ? syncSlamBrain(r) : null;
+  const res = r ? firstSlamResult(r, name) : null;
   const note = $("slam-note");
+  const legend = $("slam-legend");
   const metrics = $("slam-metrics");
   const pipe = $("slam-pipe");
+  if (legend) {
+    legend.innerHTML = `
+      <span><i class="sw" style="background:#2a3542"></i>unknown</span>
+      <span><i class="sw" style="background:#0e141d;border:1px solid #22303c"></i>free</span>
+      <span><i class="sw" style="background:#e0b25e"></i>occupied</span>
+      <span><i class="sw" style="background:rgba(34,197,94,0.6)"></i>truth</span>
+      <span><i class="sw" style="background:#4f8cff"></i>trajectory</span>
+      <span><i class="sw" style="background:#f0a020"></i>replan</span>`;
+  }
   if (pipe) {
     pipe.innerHTML = `<div class="pipe-row"><span class="node">LiDAR</span>
       <span class="arrow">→</span><span class="node">SLAM map</span>
@@ -407,12 +451,15 @@ function renderSlam() {
       ? `<span class="dim">ground-truth map (no mapping). Switch <b>map</b> to SLAM to see discovery.</span>`
       : `<span class="dim">no map in this report.</span>`;
     const canvas = $("slam-map");
-    if (canvas && r) drawSlamMap(canvas, r, state.cursor);
+    if (canvas && r) drawSlamMap(canvas, r, state.cursor, name);
+    drawSlamTimeline($("slam-timeline"), r || {}, state.cursor, name);
     return;
   }
-  if (note) note.textContent = `map: SLAM · ${res.controller}`;
+  const color = colorOf(res.controller);
+  if (note) note.innerHTML = `map: SLAM · <b style="color:${color}">${SHORT[res.controller] || res.controller}</b>`;
   updateSlamMetrics(res);
-  drawSlamMap($("slam-map"), r, state.cursor);
+  drawSlamMap($("slam-map"), r, state.cursor, name);
+  drawSlamTimeline($("slam-timeline"), r, state.cursor, name);
 }
 
 function updateSlamMetrics(res) {
@@ -421,14 +468,18 @@ function updateSlamMetrics(res) {
   const s = res.slam;
   const ex = s.explored_frac && s.explored_frac.length
     ? s.explored_frac[Math.min(state.cursor, s.explored_frac.length - 1)] : 0;
-  const found = s.path_found_step >= 0 ? `step ${s.path_found_step}` : "—";
+  const steps = s.replan_steps || [];
+  const last = steps.length ? steps[steps.length - 1] : null;
+  const active = steps.some((k) => Math.abs(k - state.cursor) <= 1);
+  const tag = active ? ` <b style="color:#f0a020">⟳ replanning</b>` : "";
   el.innerHTML = `
     <div class="pipe-row"><span class="node">explored</span> ${(ex * 100).toFixed(0)}%
       &nbsp;·&nbsp; <span class="node">surface</span> ${(s.surface_coverage * 100).toFixed(0)}%
-      &nbsp;·&nbsp; <span class="node">IoU</span> ${s.iou_vs_truth.toFixed(2)}
-      &nbsp;·&nbsp; <span class="node">replans</span> ${s.replans}
-      &nbsp;·&nbsp; <span class="node">goal path</span> ${found}</div>`;
+      &nbsp;·&nbsp; <span class="node" title="IoU vs the whole truth shell — penalises never-observed far faces">IoU</span>
+      <span title="IoU vs the whole truth shell">${s.iou_vs_truth.toFixed(2)}</span>
+      &nbsp;·&nbsp; <span class="node">replans</span> ${s.replans}${last != null ? ` (last @ ${(last * (state.report.dt)).toFixed(1)} s)` : ""}${tag}</div>`;
 }
+
 
 function renderResultBar() {
   const r = state.report;
@@ -490,9 +541,10 @@ function paintCursor() {
   if (now - state.lastStageMs > 45) {
     updateStage($("stage"), r, stageRefs, state.cursor, vizOpts());
     paintSpikes(r, state.cursor);
-    const res = firstSlamResult(r);
+    const res = firstSlamResult(r, state.slamBrain);
     if (res && res.map) {
-      drawSlamMap($("slam-map"), r, state.cursor);
+      drawSlamMap($("slam-map"), r, state.cursor, state.slamBrain);
+      drawSlamTimeline($("slam-timeline"), r, state.cursor, state.slamBrain);
       updateSlamMetrics(res);
     }
     const cx = ref ? ref.t[Math.min(state.cursor, ref.t.length - 1)] : null;
