@@ -53,7 +53,7 @@ $$
 \text{cam} = \frac{w_b\,\text{look} + (1-w_b)(1,0,0)}{\lVert \cdot \rVert}.
 $$
 
-Otherwise `cam = (1,0,0)`. Rows of the desired rotation are
+Otherwise `cam = (1,0,0)`. The columns of the desired rotation (the body axes) are
 
 $$
 y_b = \frac{\hat z_{b,\text{des}} \times \text{cam}}{\lVert \cdot \rVert},\qquad
@@ -127,7 +127,7 @@ $$
 The speed ceiling comes from the battery (`plant.py:226-247`):
 
 $$
-i_\text{tot} = \tfrac{1}{4}\!\sum i_k + I_\text{av},\quad
+i_\text{tot} = \sum_k i_k + I_\text{av},\quad
 v_\text{ocv} = V_\text{min} + 3\,\mathrm{soc} + 0.6\,\mathrm{soc}^2,\quad
 v_\text{term} = v_\text{ocv} - i_\text{tot} R_\text{int},
 $$
@@ -202,7 +202,7 @@ state evolves inside them. `Simulation.step` = one 20 ms frame.
 | `m` | 0.5 kg | mass |
 | `g` | 9.81 m/s² | gravity |
 | `J` | (2.3e-3, 2.3e-3, 4.0e-3) kg·m² | body inertia |
-| `d` | 0.15 m | motor-to-motor diagonal |
+| `d` | 0.15 m | centre-to-motor arm length |
 | `C_T` | 1.5e-5 | rotor thrust coefficient |
 | `C_Q` | 2.5e-7 | rotor drag-torque coefficient |
 | `k_vz` | 1.4e-4 | axial climb inflow penalty |
@@ -228,7 +228,37 @@ Once per frame the plant reports (`plant.py:280-312`): `g_force`, `thrust_n`,
 `thrust_saturated`, and per-rotor `rpm{1..4}` / `current{1..4}`. These flow into
 the CSV/NPZ export and the dashboard's telemetry charts.
 
-## 10. Schematics
+## 10. Specific force (ideal accelerometer)
+
+The plant also reports the body-frame **specific force** an ideal accelerometer
+would measure: the non-gravitational force per unit mass,
+
+$$
+f_b = \frac{1}{m} R^\top \big(F_\text{thrust} + R(F_H + F_\text{drag}) + F_\text{dist} + F_\text{damp}\big)
+= \frac{T_\text{actual}}{m}\hat z + \frac{F_H + F_\text{drag}}{m} + \dots
+$$
+
+(`plant.py`, telemetry `sf_bx/sf_by/sf_bz`). Gravity is excluded — an
+accelerometer cannot measure it — so a level hover reads `+g` along body z
+(≈9.81 m/s²), not `2g`. This is the sensor model consumed by `sensors.py`; the
+estimator models the same thrust + H-drag + fuselage-drag terms (residual
+mismatch: rotor in-flow loss) — see
+[estimation.md](estimation.md#6-estimator--plant-model-mismatches).
+
+## 11. Modelling choices and known omissions
+
+- The motor **reaction torque** `J_m ω̇` on the body is not included in the
+  rigid-body torque (only the rotor aerodynamic drag `d_m ω_m + C_Q ω_m²`).
+- `C_D_body` is effectively a drag-area (`CdA`); the reference area is folded in.
+- Obstacles are **2.5-D** (horizontal cross-section with a stored height). The
+  clearance metric is horizontal and treats the drone as a **point**, so it does
+  not account for arm/prop radius.
+- The battery-voltage speed ceiling `omega_max_v` (≈1000 rad/s) is far above the
+  hover speed (≈286 rad/s) and effectively never binds in these runs.
+- The physics here is a numpy model; PyChrono is only a visualization layer
+  (see [architecture.md](architecture.md)).
+
+## 12. Schematics
 
 - [assets/schematics/plant-control-loop.svg](assets/schematics/plant-control-loop.svg)
   — desired attitude → mixer → motor/battery → rigid body → telemetry.

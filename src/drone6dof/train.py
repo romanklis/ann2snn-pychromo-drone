@@ -203,6 +203,7 @@ def _estimator_rollout(backend, layout_scene, ref, n_frames, teacher, rng, state
             "p": backend.position, "v": np.asarray(backend.state, dtype=np.float64)[3:6],
             "R": backend.rotation, "omega": backend.omega, "omega_m": backend.omega_m,
             "mass": backend.plant.p.m, "C_T": backend.plant.p.C_T,
+            "specific_force_body": backend.specific_force_body,
         }
         est = estimator.step(sensors.measure(k + 1, truth), backend.rotor_target)
     return xs, ys

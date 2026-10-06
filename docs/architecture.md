@@ -40,6 +40,10 @@ flowchart TB
   APP --> WEB
 ```
 
+**Online vs offline.** The `runtime` + `surfaces` blocks run online (numpy only);
+the `train` block is offline (torch, separate image) and only produces the weight
+bundles. PyChrono appears only in `surfaces` and never computes dynamics.
+
 The core is deliberately free of Chrono and Flask imports: `sim.py` imports no
 renderer, so the headless CLI, the tests and the dashboard all drive the same
 `Simulation` (`src/drone6dof/sim.py:1-5`).
@@ -51,8 +55,11 @@ renderer, so the headless CLI, the tests and the dashboard all drive the same
 | `config.py` | The `quad6dof` example: steps, limits, initial state, scene, teacher kwargs, sensor/estimator config, obstacle layout, preset scenes |
 | `params.py` | Physical constants and `QuadParams` (mass, inertia, rotor/motor/battery, autopilot gains) |
 | `scene.py` / `geometry.py` | Scene (goal + obstacles) and 2.5-D obstacle geometry (boxes/cylinders, SDF, normals, ray casting) |
+| `planner.py` | Grid A* global planner (inflation, string-pull) over the 2.5-D scene or a live map |
+| `slam.py` | SLAM-lite occupancy mapper (log-odds, inverse sensor model, frontier, discovery metrics) |
+| `guidance.py` | `PathTracker` global path-tracking DS + privileged teacher supervisor |
 | `task.py` | Navigation task contract: obstacle features, telemetry, success mask |
-| `reference.py` | Constant-goal reference `r(t)=goal`, `ṙ=r̈=0` |
+| `reference.py` | Constant-goal `goal_reference` and planner `path_reference` |
 | `plant.py` / `so3.py` / `dynamics.py` | The 6-DoF plant, SO(3) utilities and the backend interface (`NumpyPlantBackend`, plus a `ChronoDynamicsBackend` stub) |
 | `sensor.py` | LiDAR scan + cues for the sensor-conditioned policy |
 | `sensors.py` | Onboard sensor suite (GPS/IMU/INS/baro/mag/LiDAR) producing `Measurement` / `Observation` |
@@ -60,7 +67,7 @@ renderer, so the headless CLI, the tests and the dashboard all drive the same
 | `control.py` | `DSGuidanceController` (teacher) and `ClassicalPDController` |
 | `policy.py` | Policy input assembly and `ReferenceAccelEstimator` |
 | `connectome.py` | Sparse recurrent connectome ANN and its integrate-and-fire SNN transfer |
-| `field.py` | Trajectory-anchored potential basis, teacher barrier, DS modulation |
+| `field.py` | RBF potential basis, teacher barrier, gradient-matched target, DS modulation, gates |
 | `field_control.py` | `FieldDSController` (`field_ann`, `field_snn`) |
 | `train.py` / `train_field.py` | torch distillation (separate training image) |
 | `weights.py` | Weight-bundle format, load/save and the config fingerprint guard |
@@ -82,7 +89,7 @@ sequenceDiagram
   C->>C: act(Observation(estimate), reference.at(k))
   C-->>P: u (acceleration demand, m/s²)
   P->>P: integrate 500 Hz substeps
-  P->>S: truth {p, v, R, ω, ω_m}
+  P->>S: truth {p, v, R, ω, ω_m, specific_force}
   S->>E: Measurement (rate-limited, noisy)
   E->>E: predict(rotor_target) then update(meas)
   E-->>C: estimate [p, v] for the next frame
@@ -120,11 +127,50 @@ policy. The two bundle formats are:
 
 | Format | File | Contents |
 |---|---|---|
-| `ann2snn.drone6dof.connectome@3` | `weights/quad6dof_connectome.npz` | `w_in`, `w_out`, sparse `edges`, `polarity`, `w_mag`, fields |
-| `ann2snn.drone6dof.field@1` | `weights/quad6dof_field.npz` | same schema plus the `FieldConfig` block |
+| `ann2snn.drone6dof.connectome@4` | `weights/quad6dof_connectome.npz` | `w_in`, `w_out`, sparse `edges`, `polarity`, `w_mag`, fields |
+| `ann2snn.drone6dof.field@3` | `weights/quad6dof_field.npz` | same schema plus the `FieldConfig`, planner/guidance and `readout_gain` |
 
 `weights/quad6dof_reference_io.npz` and `weights/quad6dof_field_ref.npz` hold
 torch reference inputs/outputs for the no-torch parity tests.
+
+## 5b. Global guidance + local residual (plan D)
+
+The structured field arms now split roles explicitly:
+
+```mermaid
+flowchart LR
+  MAP["scene (map)"] --> AST["A* planner<br/>planner.py"]
+  AST --> REF["path_reference<br/>pos, vel, acc"]
+  REF --> TRK["PathTracker v_nom<br/>global guidance"]
+  LID["LiDAR"] --> NET["field net g_θ"]
+  NET --> FLD["gated −∇U_θ"]
+  TRK --> MOD["modulate_ds"]
+  FLD --> MOD
+  MOD --> IMP["impedance → u"]
+```
+
+- **Global**: `planner.py` A* on the inflated 2.5-D occupancy → `reference.path_reference`
+  → `guidance.PathTracker` guidance `v_nom = ṙ_ref + k(r_ref − p)`.
+- **Local**: the LiDAR field net supplies a gated correction
+  `v_des = modulate_ds(v_nom, ρ·(−∇U_θ))` (`ρ` = distance gate × goal-capture fade).
+- **Training target**: gradient matching to the teacher field `F* = −∇U*`
+  (`field.fit_field_coeffs`), not `U*` values; labels come from
+  `guidance.SupervisorController` (planner + teacher modulation, privileged).
+
+The connectome `ann`/`snn` arms are unchanged. See
+[field.md](field.md#8-measured-result) for the before/after.
+
+### 5c. Online map (SLAM-lite)
+
+With `map_source="slam"` (or the dashboard **map** selector), `Simulation` builds
+an `OccupancyMap` and fuses the LiDAR scan at the UKF's estimated pose each frame
+(`sim._update_map`), sharing the live map with the controller through
+`reference.meta["map"]`. `FieldDSController` plans on the map
+(`OccupancyMap.plan`, conservative), replans every `SLAM.replan_period` frames,
+and falls back to the nearest frontier when the goal is not yet reachable. The
+mapper's discovery metrics and downsampled occupancy frames are attached to the
+report (`results[*].map` / `.slam`) and drawn in the dashboard. See
+[slam.md](slam.md). `map_source="truth"` keeps the original privileged planner.
 
 ## 6. Surfaces
 

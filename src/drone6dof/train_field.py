@@ -19,7 +19,7 @@ import numpy as np
 
 from .config import (
     CONTROL_LIMIT,
-    DS_TEACHER_KWARGS,
+    GUIDANCE,
     INIT_STATE,
     PLANT_GAIN,
     SENSOR,
@@ -27,11 +27,16 @@ from .config import (
     STEPS,
     build_scene,
 )
-from .connectome import ConnectomeController, ConnectomeTopology
-from .control import DSGuidanceController
+from .connectome import (
+    ConnectomeController,
+    ConnectomeTopology,
+    RateCodedConnectomeSNN,
+    SparseRecurrence,
+)
 from .dynamics import NumpyPlantBackend
 from .estimator import ErrorStateUKF
-from .field import FieldConfig, teacher_coeffs
+from .field import FieldConfig, PotentialBasis, fit_field_coeffs
+from .guidance import SupervisorController
 from .sensors import SensorSuite
 from .task import ObstacleGoalTask
 from .train import (
@@ -57,15 +62,23 @@ _DEFAULT_FIELD = FieldConfig()
 _FIELD_REF_PATH = Path(DEFAULT_FIELD_PATH).with_name("quad6dof_field_ref.npz")
 
 
+def _field_target(scene, state, goal, cfg: FieldConfig) -> np.ndarray:
+    """Gradient-matched coefficient target at ``state`` for the given ``goal``."""
+    p = np.asarray(state, dtype=np.float64).reshape(-1)[:3]
+    centers = PotentialBasis(cfg).centers(p, np.asarray(goal, dtype=np.float64))
+    return fit_field_coeffs(scene, p, centers, cfg)
+
+
 def _rollout_frames(layout_scene, n_frames: int, state0) -> Tuple[list, list]:
-    """Run teacher+plant+UKF and return per-frame (input, field target)."""
+    """Run planner-guided supervisor + plant + UKF; return (input, gradient target)."""
     task = ObstacleGoalTask(goal_tolerance=0.30)
     from .reference import goal_reference
 
-    teacher = DSGuidanceController(
-        action_limit=CONTROL_LIMIT, scene=layout_scene, task=task, **DS_TEACHER_KWARGS
-    )
     goal = layout_scene.goal_np
+    supervisor = SupervisorController(
+        layout_scene, np.asarray(state0, dtype=np.float64)[:3], goal,
+        field_config=_DEFAULT_FIELD, guidance=GUIDANCE,
+    )
     ref = goal_reference(steps=n_frames, goal=goal, dt=0.02, meta={"scene": layout_scene})
     backend = NumpyPlantBackend(heading_target=goal)
     estimator = ErrorStateUKF(params=backend.plant.p, sensor=SENSOR_SUITE, dt=0.02)
@@ -78,14 +91,15 @@ def _rollout_frames(layout_scene, n_frames: int, state0) -> Tuple[list, list]:
     xs, ys = [], []
     for k in range(n_frames):
         rp = ref.at(k)
-        u = teacher.act(est, rp)
+        u = supervisor.act(est)
         xs.append(_input(est, rp, layout_scene, SENSOR, rng))
-        ys.append(teacher_coeffs(layout_scene, est, _DEFAULT_FIELD))
+        ys.append(_field_target(layout_scene, est, goal, _DEFAULT_FIELD))
         backend.step(u, dt=0.02, limit=CONTROL_LIMIT, gain=PLANT_GAIN)
         truth = {
             "p": backend.position, "v": np.asarray(backend.state, dtype=np.float64)[3:6],
             "R": backend.rotation, "omega": backend.omega, "omega_m": backend.omega_m,
             "mass": backend.plant.p.m, "C_T": backend.plant.p.C_T,
+            "specific_force_body": backend.specific_force_body,
         }
         est = estimator.step(sensors.measure(k + 1, truth), backend.rotor_target)
     return xs, ys
@@ -124,7 +138,8 @@ def build_field_dataset(
         rp = RefPoint(pos=np.asarray(goal, dtype=np.float64), vel=np.zeros(3),
                       acc=np.zeros(3), meta={"scene": layout_scene})
         xs.append(_input(state, rp, layout_scene, SENSOR, rng))
-        ys.append(teacher_coeffs(layout_scene, state, _DEFAULT_FIELD))
+        ys.append(_field_target(layout_scene, state, np.asarray(goal, dtype=np.float64),
+                                _DEFAULT_FIELD))
 
     return np.asarray(xs, dtype=np.float64), np.asarray(ys, dtype=np.float64)
 
@@ -221,40 +236,38 @@ def main(argv: Optional[list] = None) -> int:
         n_random=args.random_samples, n_rollout=args.rollout_frames, n_scenes=args.scenes,
     )
     fields = default_field_fields(seed=int(topo.seed))
+
+    # reference io + readout calibration, computed before saving so the scalar is
+    # recorded in the bundle.  The ANN used here is the exact runtime
+    # `ConnectomeANN` (no output ReLU), so the least-squares gain matches what
+    # the controller deploys.
+    from .field import PotentialBasis
+    from .connectome import ConnectomeANN, RateCodedConnectomeSNN, SparseRecurrence
+
+    x_ref, _ = build_field_dataset(scene, n_random=0, n_rollout=64, n_scenes=1, seed=0)
+    edges_np = np.asarray(topo.edges, dtype=np.int64)
+    signed = np.abs(w_mag) * np.asarray(topo.polarity)[edges_np[1]]
+    rec = SparseRecurrence(edges_np, signed, topo.n_neurons)
+    ann = ConnectomeANN(w_in, w_out, rec, steps_per_frame=3,
+                        limit=_DEFAULT_FIELD.field_limit)
+    outs = np.asarray([ann.forward_input(row) for row in x_ref[:64]], dtype=np.float64)
+    snn = RateCodedConnectomeSNN(
+        w_in, w_out, rec, micro_steps=10, v_th=1.0, limit=_DEFAULT_FIELD.field_limit,
+    )
+    snn_outs = np.asarray([snn.forward_input(row) for row in x_ref[:64]], dtype=np.float64)
+    denom = float(np.sum(snn_outs * snn_outs))
+    gain = float(np.sum(outs * snn_outs) / denom) if denom > 1e-12 else 1.0
+
     save_field_weights(
         args.out, w_in=w_in, w_out=w_out, w_mag=w_mag, edges=topo.edges,
         polarity=topo.polarity, fields=fields, seed=int(topo.seed),
+        readout_gain=gain,
     )
-    print(f"wrote {args.out}  (final mse {report['final_mse']:.6f}, K={report['k']})")
+    print(f"wrote {args.out}  (final mse {report['final_mse']:.6f}, K={report['k']}, "
+          f"readout_gain {gain:.3f})")
 
-    bundle = {
-        "w_in": w_in, "w_out": w_out, "w_mag": w_mag, "edges": topo.edges,
-        "polarity": topo.polarity, "n_neurons": topo.n_neurons, "k": topo.k,
-        "connectome_steps": 3, "micro_steps": 10, "v_th": 1.0,
-        "field": FieldConfig().to_dict(),
-    }
     # reference io for the no-torch parity test
-    from .field import PotentialBasis
-    x_ref, _ = build_field_dataset(scene, n_random=0, n_rollout=64, n_scenes=1, seed=0)
-    import torch
-
-    idx = torch.tensor(np.asarray(bundle["edges"], dtype=np.int64))
-    signed = np.abs(bundle["w_mag"]) * np.asarray(bundle["polarity"])[
-        np.asarray(bundle["edges"][1], dtype=np.int64)
-    ]
-    wrec = torch.sparse_coo_tensor(idx, torch.tensor(signed, dtype=torch.float32),
-                                   (topo.n_neurons, topo.n_neurons)).coalesce()
-    wi = torch.tensor(bundle["w_in"], dtype=torch.float32)
-    wo = torch.tensor(bundle["w_out"], dtype=torch.float32)
-    h = torch.zeros(1, topo.n_neurons)
-    outs = []
-    for row in x_ref[:64]:
-        xb = torch.tensor(row, dtype=torch.float32).reshape(1, -1)
-        drive = xb @ wi.t()
-        for _ in range(3):
-            h = torch.relu(drive + torch.sparse.mm(wrec, h.t()).t())
-        outs.append(torch.relu(h @ wo.t())[0].detach().numpy())
-    np.savez(_FIELD_REF_PATH, inputs=x_ref[:64], ann_out=np.asarray(outs))
+    np.savez(_FIELD_REF_PATH, inputs=x_ref[:64], ann_out=outs)
     print(f"wrote {_FIELD_REF_PATH}")
 
     if not args.no_check:

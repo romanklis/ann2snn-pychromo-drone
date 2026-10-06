@@ -7,7 +7,7 @@ import numpy as np
 from drone6dof.connectome import (
     ConnectomeANN,
     ConnectomeTopology,
-    LosslessConnectomeSNN,
+    RateCodedConnectomeSNN,
     SparseRecurrence,
     DEFAULTS,
 )
@@ -63,7 +63,7 @@ def _nets(kind: str, n_neurons: int = 64, k: int = 8):
     w_out = rng.standard_normal((3, n_neurons)) * 0.1
     if kind == "ann":
         return ConnectomeANN(w_in, w_out, rec, steps_per_frame=3, limit=12.0)
-    return LosslessConnectomeSNN(w_in, w_out, rec, micro_steps=10, v_th=1.0, limit=12.0)
+    return RateCodedConnectomeSNN(w_in, w_out, rec, micro_steps=10, v_th=1.0, limit=12.0)
 
 
 def test_ann_forward_shape_and_finiteness():

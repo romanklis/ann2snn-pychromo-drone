@@ -31,7 +31,7 @@ __all__ = [
     "ConnectomeTopology",
     "SparseRecurrence",
     "ConnectomeANN",
-    "LosslessConnectomeSNN",
+    "RateCodedConnectomeSNN",
     "ConnectomeController",
     "DEFAULTS",
 ]
@@ -135,8 +135,16 @@ class ConnectomeANN:
         return {"h_norm": float(np.linalg.norm(self.h))}
 
 
-class LosslessConnectomeSNN:
-    """Integrate-and-fire transfer of :class:`ConnectomeANN` (numpy)."""
+class RateCodedConnectomeSNN:
+    """Finite-window integrate-and-fire **approximation** of :class:`ConnectomeANN`.
+
+    The conversion is *rate-coded*, not lossless: the ANN runs a fixed number of
+    discrete recurrent updates per frame, while this net integrates an IF
+    recurrence for ``micro_steps`` sub-steps and reports the mean output rate.
+    With recurrent weights, a non-negative membrane and a soft reset, the two are
+    equivalent only in the limit of many micro-steps and matched readout scaling;
+    see ``tools/snn_transfer_eval.py`` for the measured per-horizon error.
+    """
 
     def __init__(
         self,
@@ -147,6 +155,7 @@ class LosslessConnectomeSNN:
         micro_steps: int = DEFAULTS["micro_steps"],
         v_th: float = DEFAULTS["v_th"],
         limit: float = 12.0,
+        readout_gain: float = 1.0,
     ) -> None:
         self.w_in = np.asarray(w_in, dtype=np.float64)
         self.w_out = np.asarray(w_out, dtype=np.float64)
@@ -156,6 +165,7 @@ class LosslessConnectomeSNN:
         self.micro_steps = max(1, int(micro_steps))
         self.v_th = float(v_th)
         self.limit = float(limit)
+        self.readout_gain = float(readout_gain)
         self.reset()
 
     def reset(self) -> None:
@@ -177,7 +187,8 @@ class LosslessConnectomeSNN:
             any_spike = np.maximum(any_spike, self.s)     # fired at any micro-step
         # record which neurons fired during the frame (not just the last micro-step)
         self.last_spikes = any_spike.astype(np.uint8)
-        return np.clip(motor / self.micro_steps, -self.limit, self.limit)
+        return np.clip(motor / self.micro_steps * self.readout_gain,
+                       -self.limit, self.limit)
 
     def last_telemetry(self, dt: float = 0.02) -> Dict[str, float]:
         active = float(np.mean(self.last_spikes)) if self.last_spikes.size else 0.0
@@ -232,7 +243,7 @@ class ConnectomeController:
                 limit=self.action_limit,
             )
         else:
-            self.net = LosslessConnectomeSNN(
+            self.net = RateCodedConnectomeSNN(
                 bundle["w_in"], bundle["w_out"], rec,
                 micro_steps=int(bundle.get("micro_steps", 10)),
                 v_th=float(bundle.get("v_th", 1.0)),

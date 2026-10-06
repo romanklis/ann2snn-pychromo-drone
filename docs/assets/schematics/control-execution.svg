@@ -18,6 +18,7 @@
     <rect x="440" y="310" width="150" height="60" fill="#111823" stroke="#22303c" rx="6"/><text x="515" y="336" text-anchor="middle">sensors.measure</text><text x="515" y="354" text-anchor="middle" font-size="10" fill="#7b8a99">k+1</text>
     <rect x="630" y="310" width="150" height="60" fill="#111823" stroke="#22303c" rx="6"/><text x="705" y="336" text-anchor="middle">UKF.step</text><text x="705" y="354" text-anchor="middle" font-size="10" fill="#7b8a99">estimate</text>
     <rect x="60" y="410" width="720" height="46" fill="#111823" stroke="#22303c" rx="6"/><text x="420" y="438" text-anchor="middle" font-size="12">dashboard: POST /api/benchmark → run_benchmark → run_controller (fresh plant each)</text>
+    <text x="480" y="500" text-anchor="middle" font-size="12" fill="#e0a030">No independent safety layer: limits = command clip + plant saturation only</text>
   </g>
 
   <g stroke="#22b8a6" stroke-width="2" fill="none" marker-end="url(#e)">

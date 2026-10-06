@@ -122,6 +122,11 @@ class NumpyPlantBackend:
         return self.plant.last_rotor_target
 
     @property
+    def specific_force_body(self) -> np.ndarray:
+        """Body-frame specific force (ideal accelerometer reading, m/s²)."""
+        return self.plant.specific_force_body
+
+    @property
     def attitude_rpy(self) -> np.ndarray:
         return self.plant.attitude_rpy
 

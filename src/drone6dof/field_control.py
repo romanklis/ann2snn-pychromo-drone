@@ -14,13 +14,16 @@ from typing import Dict, Optional
 
 import numpy as np
 
-from .connectome import ConnectomeANN, LosslessConnectomeSNN, SparseRecurrence
+from .connectome import ConnectomeANN, RateCodedConnectomeSNN, SparseRecurrence
+from .config import GUIDANCE, PLANNER
 from .field import (
     FieldConfig,
     PotentialBasis,
+    goal_fade,
+    gate,
     modulate_ds,
-    nominal_ds,
 )
+from .guidance import PathTracker
 from .policy import ReferenceAccelEstimator, policy_input_with_scan
 from .sensor import SensorConfig
 
@@ -77,6 +80,11 @@ class FieldDSController:
         self._rng = np.random.default_rng(self.sensor.seed)
         self._last_scan = None
         self._last: Dict[str, float] = {}
+        self.guidance = dict(GUIDANCE)
+        self.planner_config = PLANNER
+        self._tracker: Optional[PathTracker] = None
+        self._tracker_goal = None
+        self._frame = 0
 
         edges = np.asarray(bundle["edges"], dtype=np.int64)
         polarity = np.asarray(bundle["polarity"], dtype=np.float64)
@@ -89,11 +97,12 @@ class FieldDSController:
                 limit=float(self.cfg.field_limit),
             )
         else:
-            self.net = LosslessConnectomeSNN(
+            self.net = RateCodedConnectomeSNN(
                 bundle["w_in"], bundle["w_out"], rec,
                 micro_steps=int(bundle.get("micro_steps", 10)),
                 v_th=float(bundle.get("v_th", 1.0)),
                 limit=float(self.cfg.field_limit),
+                readout_gain=float(bundle.get("readout_gain", 1.0)),
             )
 
     def reset(self) -> None:
@@ -102,6 +111,46 @@ class FieldDSController:
         self._rng = np.random.default_rng(self.sensor.seed)
         self._last = {}
         self._last_scan = None
+        self._tracker = None
+        self._tracker_goal = None
+        self._frame = 0
+
+    def _make_tracker(self, scene, goal, start, way=None) -> PathTracker:
+        g = self.guidance
+        return PathTracker(
+            scene, start, goal, way=way,
+            speed=float(g.get("speed", 1.4)), k_path=float(g.get("k_path", 1.0)),
+            lookahead=float(g.get("lookahead", 0.5)), brake=float(g.get("brake", 0.8)),
+            planner_config=self.planner_config,
+        )
+
+    def _ensure_tracker(self, scene, goal, start, map_=None) -> None:
+        goal = np.asarray(goal, dtype=np.float64).reshape(3)
+        if map_ is not None:
+            period = max(1, int(getattr(map_.cfg, "replan_period", 10)))
+            fresh = self._tracker is None or not np.allclose(self._tracker_goal, goal)
+            if fresh or (self._frame % period == 0):
+                way = map_.plan(start[:2], goal[:2])
+                if way is not None:
+                    if map_.path_found_step is None:
+                        map_.path_found_step = int(self._frame)
+                else:
+                    frontier = map_.nearest_frontier(goal[:2])
+                    way = map_.plan(start[:2], frontier) if frontier is not None else None
+                    if way is None and self._tracker is not None:
+                        self._frame += 1
+                        return            # keep the previous route
+                if self._tracker is None:
+                    self._tracker = self._make_tracker(scene, goal, start, way=way)
+                else:
+                    self._tracker.set_path(way, start=start)
+                self._tracker_goal = goal.copy()
+            self._frame += 1
+            return
+        if self._tracker is not None and np.allclose(self._tracker_goal, goal):
+            return
+        self._tracker = self._make_tracker(scene, goal, start)
+        self._tracker_goal = goal.copy()
 
     def act(self, state, ref) -> np.ndarray:
         t0 = time.perf_counter()
@@ -109,6 +158,9 @@ class FieldDSController:
         if scene is None:
             raise ValueError("the field controller needs ref.meta['scene']")
         state = np.asarray(getattr(state, "state", state), dtype=np.float64).reshape(-1)
+        goal = np.asarray(ref.pos, dtype=np.float64).reshape(3)
+        map_ = (getattr(ref, "meta", None) or {}).get("map")
+        self._ensure_tracker(scene, goal, state[:3], map_)
         features, ranges = policy_input_with_scan(
             state, ref, scene, self.estimator, sensor=self.sensor,
             rng=self._rng, pos_dim=3,
@@ -118,12 +170,16 @@ class FieldDSController:
         raw = self.net.forward_input(features)
         coeffs = np.clip(np.asarray(raw, dtype=np.float64), 0.0, self.cfg.field_limit)
 
-        goal = np.asarray(ref.pos, dtype=np.float64)
         centers = self.basis.centers(state, goal)
         grad = self.basis.grad_U(coeffs, state[:3], centers)
         f_obs = -grad                                   # conservative F = -grad U
-        v_nom = nominal_ds(state[:3] - goal, self.gains)
-        v_des = modulate_ds(v_nom, f_obs, self.cfg)
+        v_nom = self._tracker.v_nom(state[:3])          # global A* path tracking
+
+        min_range = float(np.min(ranges)) if ranges is not None and len(ranges) else np.inf
+        weight = gate(min_range, self.cfg) * goal_fade(float(np.linalg.norm(state[:3] - goal)),
+                                                       snap=float(self.guidance.get("snap", 0.30)),
+                                                       hold=float(self.guidance.get("hold", 0.80)))
+        v_des = modulate_ds(v_nom, weight * f_obs, self.cfg)
         self._last_coeffs = coeffs.copy()
         self._last_centers = centers.copy()
         self._last_v_nom = v_nom.copy()
@@ -142,7 +198,10 @@ class FieldDSController:
         base = {
             "field_norm": mag,
             "mod_weight": float(np.clip(mag / self.cfg.f_ref, 0.0, 1.0)),
+            "gate": float(weight),
             "coeff_norm": float(np.linalg.norm(coeffs)),
+            "planned": 1.0 if (self._tracker is not None and self._tracker.planned) else 0.0,
+            "waypoints": float(len(self._tracker.waypoints)) if self._tracker is not None else 0.0,
             "latency_ms": (time.perf_counter() - t0) * 1e3,
         }
         if self.kind == "field_ann":

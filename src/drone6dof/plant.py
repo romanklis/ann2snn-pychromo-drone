@@ -75,6 +75,7 @@ class Quad6DoF:
         self.current = np.full(4, float(p.initial_current))
         self.tau_att = np.zeros(3)
         self.soc = float(p.soc0)
+        self._specific_force_body = np.zeros(3)
         self._last: Dict[str, float] = {}
         self._last_omega_target = np.full(4, float(p.initial_omega_m))
         self.frames = 0
@@ -94,6 +95,17 @@ class Quad6DoF:
     def last_rotor_target(self) -> np.ndarray:
         """Applied/commanded rotor speeds (rad/s) from the last substep."""
         return self._last_omega_target.copy()
+
+    @property
+    def specific_force_body(self) -> np.ndarray:
+        """Body-frame specific force (non-gravitational force / mass, m/s²).
+
+        This is what an ideal accelerometer mounted on the body would measure:
+        ``Rᵀ (F_thrust + R(F_H + F_drag) + F_dist + F_damp) / m``.  Gravity is
+        excluded — an accelerometer cannot measure it — so at level hover the
+        reading is ``+g`` along body z (not ``2g``).
+        """
+        return self._specific_force_body.copy()
 
     # ------------------------------------------------------------------- step
     def __call__(
@@ -277,6 +289,13 @@ class Quad6DoF:
             pos = pos + vel * h
             self.substeps += 1
 
+        # ---- ideal-accelerometer specific force (last substep) ----------------- #
+        # Non-gravitational force per unit mass in the body frame: thrust,
+        # rotor in-flow loss + in-plane drag, fuselage drag, disturbance and
+        # embodiment damping.  Gravity is NOT measurable by an accelerometer.
+        F_non_grav = F_thrust_world + self.R @ (F_H + F_drag) + dist_force + F_damp
+        self._specific_force_body = (self.R.T @ F_non_grav) / p.m
+
         # ---- telemetry, once per pipeline frame (as the prototype logs it) ----- #
         v_in_plane = float(np.hypot(v_body[0], v_body[1]))
         omega_mean = float(np.mean(self.omega_m))
@@ -291,6 +310,9 @@ class Quad6DoF:
         )
         self._last = {
             "g_force": float(np.linalg.norm(F_thrust_world) / (p.m * self._g)),
+            "sf_bx": float(self._specific_force_body[0]),
+            "sf_by": float(self._specific_force_body[1]),
+            "sf_bz": float(self._specific_force_body[2]),
             "thrust_n": T_actual,
             "power_w": float(i_total * v_term),
             "soc_pct": float(self.soc * 100.0),

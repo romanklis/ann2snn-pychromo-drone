@@ -6,7 +6,7 @@
 
   <g font-family="system-ui, sans-serif" font-size="13" fill="#c9d1d9">
     <rect x="40" y="110" width="260" height="150" fill="#111823" stroke="#22303c" rx="8"/>
-    <text x="170" y="136" text-anchor="middle" fill="#7b8a99" font-size="12">runtime (numpy only)</text>
+    <text x="170" y="136" text-anchor="middle" fill="#7b8a99" font-size="12">ONLINE (numpy only)</text>
     <rect x="60" y="150" width="220" height="34" fill="#0e141d" stroke="#22303c" rx="6"/><text x="170" y="172" text-anchor="middle">Simulation (sim.py)</text>
     <rect x="60" y="196" width="220" height="34" fill="#0e141d" stroke="#22303c" rx="6"/><text x="170" y="218" text-anchor="middle">Quad6DoF plant</text>
 
@@ -21,7 +21,7 @@
     <rect x="680" y="196" width="220" height="34" fill="#0e141d" stroke="#22303c" rx="6"/><text x="790" y="218" text-anchor="middle">Flask API → Vite/Plotly</text>
 
     <rect x="40" y="300" width="880" height="90" fill="#111823" stroke="#22303c" rx="8"/>
-    <text x="480" y="328" text-anchor="middle" fill="#7b8a99" font-size="12">offline (torch, training image)</text>
+    <text x="480" y="328" text-anchor="middle" fill="#7b8a99" font-size="12">OFFLINE (torch, training image)</text>
     <rect x="80" y="342" width="240" height="34" fill="#0e141d" stroke="#22303c" rx="6"/><text x="200" y="364" text-anchor="middle">train.py (connectome)</text>
     <rect x="360" y="342" width="240" height="34" fill="#0e141d" stroke="#22303c" rx="6"/><text x="480" y="364" text-anchor="middle">train_field.py (field)</text>
     <rect x="640" y="342" width="240" height="34" fill="#0e141d" stroke="#22303c" rx="6"/><text x="760" y="364" text-anchor="middle">weights/*.npz + fingerprint</text>

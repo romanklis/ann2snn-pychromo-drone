@@ -199,6 +199,26 @@ class ErrorStateUKF:
     def last_nis(self) -> float:
         return float(self._last_nis)
 
+    @property
+    def min_eig(self) -> float:
+        """Smallest eigenvalue of the (symmetrised) covariance — PD health check."""
+        return float(np.linalg.eigvalsh(0.5 * (self.P + self.P.T)).min())
+
+    def _stabilize_covariance(self) -> None:
+        """Project ``P`` onto the PSD cone.
+
+        The sigma-point central weights are large and negative at ``alpha=0.3``
+        (``W0m ≈ −10.1``, ``W0c ≈ −7.2`` for the 22-D error state), so the
+        weighted covariance sum can lose positive-definiteness.  Eigen-decompose
+        and floor the spectrum rather than relying on symmetrisation alone.
+        """
+        P = 0.5 * (self.P + self.P.T)
+        w, V = np.linalg.eigh(P)
+        if float(w.min()) < 1e-9:
+            w = np.maximum(w, 1e-9)
+            P = V @ np.diag(w) @ V.T
+        self.P = 0.5 * (P + P.T)
+
     # -------------------------------------------------------------- process --
     def _process(self, x: np.ndarray, rotor_target: np.ndarray) -> np.ndarray:
         p, v, q, omega, omega_m = x[0:3], x[3:6], x[6:10], x[10:13], x[13:17]
@@ -262,6 +282,7 @@ class ErrorStateUKF:
             e = self._diff(prop[i], x_pred)
             P += self.Wc[i] * np.outer(e, e)
         self.P = 0.5 * (P + P.T)
+        self._stabilize_covariance()
         self._unpack(x_pred)
 
     # --------------------------------------------------------------- update --
@@ -274,8 +295,19 @@ class ErrorStateUKF:
             R_list.append(np.eye(3) * self.sensor.gps_sigma ** 2)
         if meas.accel is not None:
             def h_acc(x):
-                R = _R_from_q(x[6:10]); thrust = self.C_T * float(np.sum(x[13:17] ** 2))
-                return (thrust / self.m) * np.array([0.0, 0.0, 1.0]) - R.T @ self.gravity + x[17:20]
+                R = _R_from_q(x[6:10])
+                v = x[3:6]
+                thrust = self.C_T * float(np.sum(x[13:17] ** 2))
+                v_b = R.T @ v
+                omega_sum = float(np.sum(x[13:17]))
+                # Specific force = thrust + the dominant aero terms, in body frame.
+                # The estimator mirrors the plant's in-plane H-drag and fuselage
+                # drag so the accelerometer model stays consistent with the
+                # sensor (residual mismatch: rotor in-flow loss, thrust_min).
+                F_H = -self.p.k_h * omega_sum * np.array([v_b[0], v_b[1], 0.0])
+                F_drag = -0.5 * self.p.rho * np.asarray(self.p.C_D_body) * (v_b * np.abs(v_b))
+                return ((thrust / self.m) * np.array([0.0, 0.0, 1.0])
+                        + (F_H + F_drag) / self.m + x[17:20])
             h_fns.append(h_acc); z_list.append(meas.accel)
             R_list.append(np.eye(3) * self.sensor.accel_sigma ** 2)
         if meas.gyro is not None:
@@ -343,8 +375,7 @@ class ErrorStateUKF:
         dx = K @ innovation
         self._unpack(self._add(x, dx))
         self.P = self.P - K @ S @ K.T
-        self.P = 0.5 * (self.P + self.P.T)
-        np.fill_diagonal(self.P, np.maximum(np.diag(self.P), 1e-9))
+        self._stabilize_covariance()
         self._updates += 1
 
     def step(self, meas: Measurement, rotor_target: np.ndarray) -> np.ndarray:
@@ -354,4 +385,5 @@ class ErrorStateUKF:
         return self.state_view()
 
     def telemetry(self) -> Dict[str, float]:
-        return {"nis": float(self._last_nis), "updates": int(self._updates)}
+        return {"nis": float(self._last_nis), "updates": int(self._updates),
+                "min_eig": self.min_eig}

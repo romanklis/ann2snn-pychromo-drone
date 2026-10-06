@@ -44,6 +44,32 @@ def test_controllers_catalogue(client):
     assert meta["field_snn"]["spiking"] is True and meta["field_snn"]["sensor"] is True
     assert body["defaults"]["steps"] >= 1
     assert body["scene"]["goal"] == [0.0, 0.0, 2.5]
+    assert body["map_sources"] == ["truth", "slam"]
+
+
+def test_benchmark_rejects_bad_map_source(client):
+    r = client.post(
+        "/api/benchmark",
+        json={"controllers": ["ds_guidance"], "steps": 10, "map_source": "nope"},
+    )
+    assert r.status_code == 400
+
+
+def test_benchmark_slam_includes_map(client):
+    r = client.post(
+        "/api/benchmark",
+        json={"controllers": ["field_ann"], "steps": 60, "map_source": "slam"},
+    )
+    if r.status_code != 200:
+        pytest.skip("field bundle not available")
+    body = r.get_json()
+    res = body["results"].get("field_ann")
+    if res is None:
+        pytest.skip("field bundle not available")
+    assert body["map_source"] == "slam"
+    assert res["map"] is not None and res["slam"] is not None
+    assert len(res["map"]["shape"]) == 2
+    assert 0.0 <= res["slam"]["surface_coverage"] <= 1.0
 
 
 def test_benchmark_runs_selected_controllers(client):

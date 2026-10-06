@@ -13,10 +13,19 @@ from typing import Dict, List, Optional, Sequence
 
 import numpy as np
 
-from .config import CONTROL_LIMIT, INIT_STATE, PLANT_GAIN, STEPS, preset_scene
+from .config import (
+    CONTROL_LIMIT,
+    INIT_STATE,
+    MAP_SOURCE_DEFAULT,
+    PLANT_GAIN,
+    SENSOR,
+    STEPS,
+    preset_scene,
+)
 from .dynamics import NumpyPlantBackend
 from .params import DT, QuadParams
 from .sim import Simulation
+from .slam import truth_shell
 from .weights import (
     DEFAULT_WEIGHTS_PATH,
     WeightsMissing,
@@ -179,6 +188,20 @@ def _telemetry_matrix(history: Dict[str, list]) -> Dict[str, list]:
     return out
 
 
+def _surface_coverage(scene, map_, traj_xy) -> float:
+    """Recall of the truth obstacle shell cells the sensor could observe."""
+    shell = truth_shell(scene, map_)
+    X, Y = np.meshgrid(map_.xs, map_.ys, indexing="ij")
+    cells = np.stack([X.ravel(), Y.ravel()], axis=1)
+    traj = np.asarray(traj_xy, dtype=np.float64)[::5]
+    if len(traj) == 0:
+        return 0.0
+    d2 = ((cells[:, None, :] - traj[None, :, :]) ** 2).sum(axis=-1)
+    visible = (d2.min(axis=1) <= SENSOR.r_max ** 2).reshape(X.shape)
+    vis_shell = np.where((shell == 2) & visible, 2, 0)
+    return float(map_.surface_recall(vis_shell))
+
+
 def run_controller(
     name: str,
     scene,
@@ -189,6 +212,7 @@ def run_controller(
     control_limit: float = CONTROL_LIMIT,
     weights_path=None,
     seed: int = 0,
+    map_source: str = MAP_SOURCE_DEFAULT,
 ) -> dict:
     from .cli import make_controller  # local import avoids an import cycle at module load
 
@@ -203,6 +227,7 @@ def run_controller(
         gain=gain,
         control_limit=control_limit,
         initial_state=INIT_STATE,
+        map_source=map_source,
     )
     sim.run()
     history = sim.history
@@ -230,6 +255,28 @@ def run_controller(
                 scan[i] = frame
     angles = getattr(controller, "scan_angles", None)
 
+    map_payload = None
+    slam_payload = None
+    if sim.slam_map is not None:
+        frames = history.get("map_frames") or []
+        shape = [len(frames[0]), len(frames[0][0])] if frames else [0, 0]
+        map_payload = {
+            "shape": shape,
+            "bounds": [float(v) for v in sim.slam_map.cfg.bounds],
+            "times": [float(t) for t in history.get("map_times", [])],
+            "frames": frames,
+        }
+        m = metrics
+        slam_payload = {
+            "explored_frac": [float(v) for v in history.get("slam_explored", [])],
+            "entropy_bits": [float(v) for v in history.get("slam_entropy", [])],
+            "occupied_cells": [int(v) for v in history.get("slam_occupied", [])],
+            "replans": int(sim.slam_map.replans),
+            "path_found_step": m.get("slam_path_found_step", -1),
+            "iou_vs_truth": m.get("slam_iou_vs_truth", 0.0),
+            "surface_coverage": _surface_coverage(scene, sim.slam_map, state[:, :2]),
+        }
+
     label = dict(CONTROLLERS).get(name, name)
     return {
         "controller": name,
@@ -253,6 +300,8 @@ def run_controller(
             np.asarray(history["estimate"], dtype=np.float64), 3
         ).tolist(),
         "metrics": metrics,
+        "map": map_payload,
+        "slam": slam_payload,
     }
 
 
@@ -267,11 +316,13 @@ def run_benchmark(
     seed: int = 0,
     goal: Optional[Sequence[float]] = None,
     scene_name: Optional[str] = None,
+    map_source: str = MAP_SOURCE_DEFAULT,
 ) -> dict:
     """Run each requested controller on one scene and return the full report.
 
     ``goal`` overrides the shipped goal (interactive command); ``scene_name``
-    selects a named obstacle preset (``pillar``, ``boxes``, ``wall``, ``slalom``).
+    selects a named obstacle preset (``pillar``, ``boxes``, ``wall``, ``slalom``);
+    ``map_source`` is ``"truth"`` (privileged scene) or ``"slam"`` (online map).
     Raises ``ValueError`` for a malformed goal or unknown scene.
     """
     requested = list(names) if names else [name for name, _ in CONTROLLERS]
@@ -292,6 +343,7 @@ def run_benchmark(
         results[name] = run_controller(
             name, scene, steps=steps, dt=dt, gain=gain,
             control_limit=control_limit, weights_path=weights_path, seed=seed,
+            map_source=map_source,
         )
 
     per_controller = {
@@ -329,6 +381,7 @@ def run_benchmark(
         "steps": int(steps),
         "dt": float(dt),
         "seed": int(seed),
+        "map_source": str(map_source),
         "controllers": [n for n in requested if n in results],
         "unavailable": unavailable,
         "results": results,

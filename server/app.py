@@ -17,7 +17,15 @@ from drone6dof.benchmark import (
     run_benchmark,
     weights_info,
 )
-from drone6dof.config import CONTROL_LIMIT, INIT_STATE, PRESET_SCENES, QUAD_SCENE, STEPS
+from drone6dof.config import (
+    CONTROL_LIMIT,
+    INIT_STATE,
+    MAP_SOURCE_DEFAULT,
+    PRESET_SCENES,
+    QUAD_SCENE,
+    SLAM,
+    STEPS,
+)
 from drone6dof.params import DT
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -60,12 +68,15 @@ def create_app() -> Flask:
                 "weights": weights_info(),
                 "scene": QUAD_SCENE.to_dict(),
                 "scenes": sorted(PRESET_SCENES),
+                "map_sources": ["truth", "slam"],
+                "slam": dict(SLAM),
                 "defaults": {
                     "steps": STEPS,
                     "dt": DT,
                     "seed": 0,
                     "control_limit": CONTROL_LIMIT,
                     "init_state": list(INIT_STATE),
+                    "map_source": MAP_SOURCE_DEFAULT,
                 },
             }
         )
@@ -78,7 +89,13 @@ def create_app() -> Flask:
         seed = int(payload.get("seed", 0) or 0)
         goal = payload.get("goal")
         scene_name = payload.get("scene")
-        return run_benchmark(names, steps=steps, seed=seed, goal=goal, scene_name=scene_name)
+        map_source = payload.get("map_source", MAP_SOURCE_DEFAULT)
+        if map_source not in ("truth", "slam"):
+            raise ValueError("map_source must be 'truth' or 'slam'")
+        return run_benchmark(
+            names, steps=steps, seed=seed, goal=goal, scene_name=scene_name,
+            map_source=map_source,
+        )
 
     @app.post("/api/simulate")
     def simulate():

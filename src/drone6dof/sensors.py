@@ -55,6 +55,7 @@ class SensorConfig:
 
     def to_dict(self) -> dict:
         return {
+            "imu_model": "body_specific_force_v2",
             "imu_hz": float(self.imu_hz), "gps_hz": float(self.gps_hz),
             "ins_hz": float(self.ins_hz), "baro_hz": float(self.baro_hz),
             "mag_hz": float(self.mag_hz),
@@ -106,8 +107,6 @@ class SensorSuite:
         self.obstacles = tuple(obstacles)
         self.dt = float(dt)
         self.rng = np.random.default_rng(self.cfg.seed)
-        gz = 9.81
-        self.gravity = np.array([0.0, 0.0, -gz])
         self.accel_bias = np.asarray(self.cfg.accel_bias, dtype=np.float64)
         self.gyro_bias = np.asarray(self.cfg.gyro_bias, dtype=np.float64)
         self._p_imu = self.cfg.period(self.cfg.imu_hz, dt)
@@ -133,10 +132,16 @@ class SensorSuite:
             return x + self.rng.normal(0.0, scale, size=np.shape(x))
 
         if step % self._p_imu == 0:
-            # accelerometer measures specific force f = R^T (a_body - gravity)
-            thrust = C_T * float(np.sum(omega_m ** 2))
-            a_world = (thrust / m) * R[:, 2]
-            f_body = R.T @ (a_world - self.gravity)
+            # Accelerometer measures the body-frame non-gravitational specific
+            # force (thrust + rotor in-flow loss + in-plane H-drag + fuselage
+            # drag).  Gravity is not measurable, so a level hover reads +g along
+            # body z.  The fallback (thrust-only) keeps isolated unit tests that
+            # pass a minimal truth dict working.
+            sf = truth.get("specific_force_body")
+            if sf is None:
+                thrust = C_T * float(np.sum(omega_m ** 2))
+                sf = np.array([0.0, 0.0, thrust / m], dtype=np.float64)
+            f_body = np.asarray(sf, dtype=np.float64).reshape(3)
             acc = f_body + self.accel_bias + self.rng.normal(0.0, self.cfg.accel_sigma, 3)
             gyr = omega + self.gyro_bias + self.rng.normal(0.0, self.cfg.gyro_sigma, 3)
             if self.rng.random() < self.cfg.imu_outlier_p:

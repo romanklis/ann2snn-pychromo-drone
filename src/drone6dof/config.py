@@ -12,6 +12,7 @@ from typing import Optional, Sequence, Tuple
 
 from .geometry import BoxObstacle
 from .params import DT
+from .planner import PlannerConfig
 from .scene import Scene, SceneSpec
 from .sensor import SensorConfig
 from .sensors import SensorConfig as SensorSuiteConfig
@@ -30,6 +31,10 @@ __all__ = [
     "SENSOR",
     "SENSOR_SUITE",
     "ESTIMATOR",
+    "PLANNER",
+    "GUIDANCE",
+    "SLAM",
+    "MAP_SOURCE_DEFAULT",
     "OBSTACLE_LAYOUT",
     "PRESET_SCENES",
     "validate_goal",
@@ -73,6 +78,28 @@ SENSOR_SUITE = SensorSuiteConfig()
 
 #: UKF process-model parameters.
 ESTIMATOR = {"rotor_tau": 0.05, "rotor_omega_max": 1400.0}
+
+#: Global A* planner (see :mod:`drone6dof.planner`) + path-tracking guidance.
+PLANNER = PlannerConfig()
+GUIDANCE = {"speed": 1.4, "k_path": 1.0, "lookahead": 0.5, "brake": 0.8,
+            "snap": 0.30, "hold": 0.80}
+
+#: SLAM-lite occupancy mapper (LiDAR + UKF pose; see :mod:`drone6dof.slam`).
+SLAM = {
+    "res": 0.1,
+    "bounds": [-3.5, 3.5, -3.5, 3.5],
+    "log_odds_free": -0.4,
+    "log_odds_occ": 0.85,
+    "log_odds_clamp": 4.0,
+    "occ_thresh": 0.6,
+    "free_thresh": 0.4,
+    "inflate": 0.30,
+    "replan_period": 10,
+    "viz_stride": 10,
+    "viz_shape": 40,
+}
+#: default map source: "truth" keeps the shipped behaviour; "slam" uses the mapper
+MAP_SOURCE_DEFAULT = "truth"
 
 #: Obstacle distribution the policy is trained on (randomised box layouts).
 OBSTACLE_LAYOUT = {

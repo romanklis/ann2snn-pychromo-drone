@@ -20,8 +20,10 @@ from .config import (
     CONTROL_LIMIT,
     DS_TEACHER_KWARGS,
     ESTIMATOR,
+    GUIDANCE,
     INIT_STATE,
     OBSTACLE_LAYOUT,
+    PLANNER,
     QUAD_SCENE,
     SENSOR,
     SENSOR_SUITE,
@@ -51,8 +53,8 @@ __all__ = [
     "DEFAULT_FIELD_PATH",
 ]
 
-FORMAT = "ann2snn.drone6dof.connectome@3"
-FIELD_FORMAT = "ann2snn.drone6dof.field@1"
+FORMAT = "ann2snn.drone6dof.connectome@4"
+FIELD_FORMAT = "ann2snn.drone6dof.field@3"
 
 #: repo-root ``weights/`` (src/drone6dof/weights.py -> parents[2])
 _WEIGHTS_DIR = Path(__file__).resolve().parents[2] / "weights"
@@ -169,6 +171,9 @@ def make_field_fields(
     layout: Optional[Dict] = None,
     sensor_suite: Optional[SensorSuiteConfig] = None,
     estimator: Optional[Dict] = None,
+    planner: Optional[Dict] = None,
+    guidance: Optional[Dict] = None,
+    target: str = "gradient",
     connectome_steps: int = 3,
     micro_steps: int = 10,
     v_th: float = 1.0,
@@ -183,8 +188,13 @@ def make_field_fields(
     layout = layout if layout is not None else OBSTACLE_LAYOUT
     sensor_suite = sensor_suite or SENSOR_SUITE
     estimator = estimator if estimator is not None else ESTIMATOR
+    planner = planner if planner is not None else PLANNER
+    guidance = guidance if guidance is not None else GUIDANCE
     return {
         "format": FIELD_FORMAT,
+        "target": str(target),
+        "planner": (planner.to_dict() if hasattr(planner, "to_dict") else dict(planner)),
+        "guidance": {k: float(v) for k, v in dict(guidance).items()},
         "pos_dim": 3,
         "n_in": int(n_in if n_in is not None else policy_input_dim(sensor)),
         "n_out": field_config.k,
@@ -215,6 +225,9 @@ def default_field_fields(**overrides) -> Dict:
         layout=OBSTACLE_LAYOUT,
         sensor_suite=SENSOR_SUITE,
         estimator=ESTIMATOR,
+        planner=PLANNER,
+        guidance=GUIDANCE,
+        target="gradient",
         seed=42,
         state_source="estimate",
     )
@@ -257,6 +270,9 @@ def load_field_weights(path=DEFAULT_FIELD_PATH, *, expect_fields: Optional[Dict]
         }
         if "seed" in data.files:
             bundle["seed"] = int(data["seed"])
+        bundle["readout_gain"] = (
+            float(data["readout_gain"]) if "readout_gain" in data.files else 1.0
+        )
     n_neurons = int(w_out.shape[1])
     bundle.update({
         "n_neurons": n_neurons,

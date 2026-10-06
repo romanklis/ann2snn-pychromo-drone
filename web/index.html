@@ -20,6 +20,13 @@
           <select id="scene" class="goal-input"></select>
         </div>
         <div class="goal">
+          <span class="goal-label">map</span>
+          <select id="map-source" class="goal-input">
+            <option value="slam" selected>SLAM</option>
+            <option value="truth">truth</option>
+          </select>
+        </div>
+        <div class="goal">
           <span class="goal-label">goal</span>
           <input id="gx" class="goal-input" type="number" step="0.1" />
           <input id="gy" class="goal-input" type="number" step="0.1" />
@@ -60,8 +67,10 @@
       <section id="stage" class="stage"></section>
       <aside class="side">
         <div class="card">
-          <h3>Controller pipeline</h3>
-          <div id="pipeline" class="pipeline"></div>
+          <h3>SLAM map · what the drone knows <span id="slam-note" class="note"></span></h3>
+          <canvas id="slam-map" width="320" height="320"></canvas>
+          <div id="slam-metrics" class="pipeline"></div>
+          <div id="slam-pipe" class="pipeline"></div>
         </div>
         <div class="card">
           <h3>Spike activity <span id="raster-note" class="note"></span></h3>

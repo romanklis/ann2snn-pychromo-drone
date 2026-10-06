@@ -11,13 +11,24 @@ from typing import Callable, Dict, List, Optional
 
 import numpy as np
 
-from .config import CONTROL_LIMIT, DT, GOAL_TOLERANCE, INIT_STATE, PLANT_GAIN, SENSOR, STEPS
+from .config import (
+    CONTROL_LIMIT,
+    DT,
+    GOAL_TOLERANCE,
+    INIT_STATE,
+    MAP_SOURCE_DEFAULT,
+    PLANT_GAIN,
+    SENSOR,
+    SLAM,
+    STEPS,
+)
 from .dynamics import DynamicsBackend
 from .estimator import ErrorStateUKF
 from .params import QuadParams
 from .reference import goal_reference
 from .scene import Scene
 from .sensors import Observation, SensorConfig, SensorSuite
+from .slam import OccupancyMap, SlamConfig, truth_shell
 from .task import ObstacleGoalTask
 
 #: telemetry columns always present in the CSV export, in order
@@ -56,6 +67,7 @@ class Simulation:
         use_estimator: bool = True,
         estimator=None,
         sensors=None,
+        map_source: str = MAP_SOURCE_DEFAULT,
     ) -> None:
         self.backend = backend
         self.controller = controller
@@ -70,6 +82,15 @@ class Simulation:
         self.reference = goal_reference(
             steps=self.steps, goal=scene.goal, dt=self.dt, meta={"scene": scene}
         )
+        self.map_source = str(map_source or "truth")
+        self.slam_config = SlamConfig.from_dict(SLAM)
+        self.slam_map: Optional[OccupancyMap] = None
+        self._truth_occ = None
+        if self.map_source == "slam":
+            self.slam_map = OccupancyMap(self.slam_config)
+            self._truth_occ = truth_shell(scene, self.slam_map)
+            # the mapper is shared with the controller through the reference meta
+            self.reference.meta["map"] = self.slam_map
         self._disturbance = disturbance
         # Estimator-in-the-loop: the plant is the hidden truth; controllers only
         # ever consume the UKF estimate.
@@ -104,6 +125,10 @@ class Simulation:
         else:
             self._est_state = self.initial_state.copy()
             self._gps_ok = True
+        if self.map_source == "slam":
+            self.slam_map = OccupancyMap(self.slam_config)
+            self._truth_occ = truth_shell(self.scene, self.slam_map)
+            self.reference.meta["map"] = self.slam_map
         self.k = 0
         self.history: Dict[str, list] = {
             "state": [],
@@ -116,6 +141,11 @@ class Simulation:
             "scan": [],          # raw LiDAR ranges per frame, for sensor controllers
             "estimate": [],      # estimated [p, v] per frame
             "est_error": [],     # true p - estimated p
+            "map_frames": [],    # dense occupancy snapshots (slam only)
+            "map_times": [],
+            "slam_explored": [],
+            "slam_entropy": [],
+            "slam_occupied": [],
         }
         self._record(np.zeros(3))
         return self.observe()
@@ -151,16 +181,27 @@ class Simulation:
                 "omega_m": self.backend.omega_m,
                 "mass": p.m,
                 "C_T": p.C_T,
+                "specific_force_body": self.backend.specific_force_body,
             }
             meas = self.sensors.measure(self.k + 1, truth)
             rotor_target = getattr(self.backend, "rotor_target", np.full(4, p.hover_omega))
             self._est_state = self.estimator.step(meas, rotor_target)
             self._gps_ok = bool(meas.gps_ok)
+            self._update_map(getattr(meas, "scan", None), getattr(meas, "scan_angles", None))
         else:
             self._est_state = np.asarray(self.backend.state, dtype=np.float64).copy()
+            self._update_map(getattr(self.controller, "last_scan", None),
+                             getattr(self.controller, "scan_angles", None))
         self.k += 1
         self._record(action)
         return self.observe()
+
+    def _update_map(self, scan, angles) -> None:
+        """Fuse one LiDAR scan into the SLAM map at the estimated pose."""
+        if self.slam_map is None or scan is None or angles is None:
+            return
+        pose = np.asarray(self._est_state, dtype=np.float64).reshape(-1)[:2]
+        self.slam_map.update(pose, scan, angles, SENSOR.r_max)
 
     def step_n(self, n: int = 1) -> dict:
         obs = self.observe()
@@ -215,6 +256,13 @@ class Simulation:
         est = np.asarray(self._est_state, dtype=np.float64).reshape(-1)
         self.history["estimate"].append(est.copy())
         self.history["est_error"].append(state[:3] - est[:3])
+        if self.slam_map is not None:
+            self.history["slam_explored"].append(self.slam_map.explored_frac())
+            self.history["slam_entropy"].append(self.slam_map.entropy_bits())
+            self.history["slam_occupied"].append(self.slam_map.occupied_cells())
+            if self.k % max(1, int(self.slam_map.cfg.viz_stride)) == 0:
+                self.history["map_frames"].append(self.slam_map.dense().astype(int).tolist())
+                self.history["map_times"].append(float(self.k * self.dt))
 
     def observe(self) -> dict:
         idx = min(self.k, len(self.reference) - 1)
@@ -252,7 +300,7 @@ class Simulation:
         cmd = np.asarray(self.history["command"], dtype=np.float64)
         smooth = (np.linalg.norm(np.diff(cmd, axis=0), axis=1)
                   if len(cmd) > 1 else np.zeros(0))
-        return {
+        out = {
             "controller": getattr(self.controller, "name", "controller"),
             "steps": int(self.k),
             "clearance_min_m": float(clearances.min()) if len(clearances) else float("nan"),
@@ -270,6 +318,18 @@ class Simulation:
             "peak_g_force": float(np.nanmax(g_forces)) if g_forces else float("nan"),
             "soc_end_pct": float(soc[-1]) if soc else float("nan"),
         }
+        if self.slam_map is not None:
+            out["map_source"] = "slam"
+            out["slam_replans"] = int(self.slam_map.replans)
+            out["slam_explored_frac"] = (
+                float(self.history["slam_explored"][-1]) if self.history["slam_explored"] else 0.0
+            )
+            out["slam_iou_vs_truth"] = float(self.slam_map.iou(self._truth_occ))
+            out["slam_path_found_step"] = (
+                int(self.slam_map.path_found_step)
+                if self.slam_map.path_found_step is not None else -1
+            )
+        return out
 
     def telemetry_columns(self) -> List[str]:
         keys = set(_BASE_TELEMETRY)

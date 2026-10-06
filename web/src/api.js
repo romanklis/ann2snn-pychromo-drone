@@ -21,10 +21,11 @@ export async function getHealth() {
   return readJson(await fetch("/api/health"));
 }
 
-export async function runBenchmark(controllers, { steps = 500, seed = 0, goal = null, scene = null } = {}) {
+export async function runBenchmark(controllers, { steps = 500, seed = 0, goal = null, scene = null, mapSource = null } = {}) {
   const payload = { controllers, steps, seed };
   if (Array.isArray(goal) && goal.length === 3) payload.goal = goal;
   if (scene) payload.scene = scene;
+  if (mapSource) payload.map_source = mapSource;
   const response = await fetch("/api/benchmark", {
     method: "POST",
     headers: { "content-type": "application/json" },

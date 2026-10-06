@@ -35,7 +35,7 @@ class QuadParams:
     m: float = 0.5
     g: float = GRAVITY
     J: Tuple[float, float, float] = (2.3e-3, 2.3e-3, 4.0e-3)
-    d: float = 0.15                      # motor-to-motor diagonal [m]
+    d: float = 0.15                      # centre-to-motor arm length [m]
     # -- fuselage aerodynamics ---------------------------------------------- #
     rho: float = 1.225
     C_D_body: Tuple[float, float, float] = (0.022, 0.022, 0.048)

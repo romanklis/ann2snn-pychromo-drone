@@ -14,6 +14,8 @@ from drone6dof.sim import Simulation
 
 
 def _truth():
+    # Level hover: 4 rotors at the hover speed produce specific force +g along
+    # body z (an ideal accelerometer cannot measure gravity).
     return {
         "p": np.array([0.0, 0.0, 1.0]),
         "v": np.array([0.2, 0.0, 0.0]),
@@ -22,6 +24,7 @@ def _truth():
         "omega_m": np.full(4, 286.0),
         "mass": 0.5,
         "C_T": 1.5e-5,
+        "specific_force_body": np.array([0.0, 0.0, 9.81]),
     }
 
 
@@ -75,3 +78,35 @@ def test_estimator_is_deterministic():
         return np.asarray(sim.history["estimate"], dtype=float)
 
     assert np.array_equal(run(), run())
+
+
+def test_ukf_covariance_stays_positive_definite():
+    scene = build_scene()
+    backend = NumpyPlantBackend(heading_target=scene.goal_np)
+    ctrl = DSGuidanceController(action_limit=CONTROL_LIMIT, scene=scene)
+    sim = Simulation(backend, ctrl, scene, steps=120, initial_state=INIT_STATE,
+                     use_estimator=True)
+    for _ in range(120):
+        sim.step()
+        assert sim.estimator.min_eig >= -1e-9, sim.estimator.min_eig
+    assert np.all(np.isfinite(sim.estimator.P))
+
+
+def test_ukf_zero_bias_initialisation_is_stable():
+    # The shipped default initialises b_a/b_g to the *true* simulated biases
+    # (privileged).  With zero initial bias the filter must still stay finite and
+    # PSD while it learns the bias.
+    from drone6dof.config import SENSOR_SUITE
+
+    truth = _truth()
+    suite = SensorSuite(SensorConfig(seed=3), lidar=SENSOR, dt=0.02)
+    ukf = ErrorStateUKF(sensor=SENSOR_SUITE)
+    ukf.reset(truth["p"], truth["v"])
+    ukf.b_a = np.zeros(3)
+    ukf.b_g = np.zeros(3)
+    for step in range(1, 60):
+        meas = suite.measure(step, truth)
+        view = ukf.step(meas, truth["omega_m"])
+        assert np.all(np.isfinite(view))
+        assert ukf.min_eig >= -1e-9
+    assert np.linalg.norm(ukf.q) == pytest.approx(1.0, abs=1e-9)

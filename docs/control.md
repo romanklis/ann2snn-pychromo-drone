@@ -62,10 +62,12 @@ $$
 composed over the scene's obstacles with the same law for boxes and cylinders
 (`control.py:92-119`). The acceleration demand comes from a passive impedance
 toward $v_\text{des}$ with separate along/across damping
-(`damping_along = 1.2`, `damping_across = 4.5`):
+(`damping_along = 1.2 [1/s]`, `damping_across = 4.5 [1/s]`). With
+$dv = v - v_\text{des}$, $\hat v = v_\text{des}/\lVert v_\text{des}\rVert$,
+$a_\parallel = dv\cdot\hat v$ and $a_\perp = dv - a_\parallel\hat v$:
 
 $$
-u = -\frac{1}{m}\big(d_\parallel\,(v-v_\text{des})\cdot\hat v_\text{des}\,\hat v_\text{des} + d_\perp\,((v-v_\text{des}) - \cdot\,\hat v_\text{des}\,\hat v_\text{des})\big),
+u = -\frac{1}{m}\big(d_\parallel\, a_\parallel\, \hat v + d_\perp\, a_\perp\big)\quad [\text{m/s}^2],
 $$
 
 clipped to `action_limit` (`control.py:121-129,157-158`).
@@ -82,6 +84,8 @@ $$
 
 defaults `omega_n = 3.5`, `zeta = 0.85`, `plant_gain = 1`. It is deliberately
 obstacle-blind, so it flies straight into the pillar — the negative control.
+Note it is a **PD** law (no integral term), despite the `pid` name kept for
+parity with upstream.
 
 ## 5. `ann` / `snn` — end-to-end connectome
 
@@ -94,25 +98,33 @@ difference of `x - e`; for a constant goal it settles to zero
 
 - `ann` — sparse recurrent ReLU network, 1000 neurons / fan-in 40 / 3 recurrent
   steps (`connectome.py:102-135`).
-- `snn` — integrate-and-fire transfer, 10 micro-steps, `v_th = 1.0`
-  (`connectome.py:138-190`).
+- `snn` — rate-coded integrate-and-fire **approximation** of the ANN, 10
+  micro-steps, `v_th = 1.0` (`connectome.py:138-190`); see
+  [field.md §7](field.md#7-what-the-ann-field-model-is-and-what-the-transferred-snn-is).
 
 The full network description is in
 [field.md §7](field.md#7-what-the-ann-field-model-is-and-what-the-transferred-snn-is).
 
-## 6. `field_ann` / `field_snn` — structured field
+## 6. `field_ann` / `field_snn` — structured field (global planner + local residual)
 
-The network outputs the $K$ field coefficients; the gradient, modulation and
-impedance are analytic (`field_control.py:106-154`):
+Global guidance is an A\* path-tracking DS (`planner.py` → `reference.path_reference`
+→ `guidance.PathTracker`, `v_nom = ṙ_ref + k(r_ref − p)`); the LiDAR network
+supplies a **gated local residual** (`field_control.py:106-170`):
 
 $$
-a = \mathrm{clip}\big(\text{net}(\phi), 0, \text{field\_limit}\big)
-\Rightarrow F_\text{obs} = -\nabla U_\text{obs}
-\Rightarrow v_\text{des} = \text{modulate}(v_\text{nom}, F_\text{obs})
-\Rightarrow u.
+a = \mathrm{clip}\big(\text{net}(\phi), 0, \text{field\_limit}\big),\quad
+F = -\nabla U_a,\quad
+v_\text{des} = \mathrm{modulate}\big(v_\text{nom},\ \rho\,F\big),
 $$
 
-See [field.md](field.md) for the methodology.
+with the gate $\rho = \rho_\text{dist}\cdot\rho_\text{goal}$ (distance gate ×
+goal-capture fade) so the residual vanishes in free space and near the goal.
+Training labels are the teacher's modulated flow on the planner's `v_nom`
+(`guidance.SupervisorController`, privileged).
+
+**Terminology.** `F_obs = −∇U_obs` is an **obstacle modulation (repulsion)
+vector**, not a physical Newtonian force: it reshapes the desired velocity. The
+word "force" is reserved for the plant dynamics in [physics.md](physics.md).
 
 ## 7. Execution
 
@@ -146,7 +158,17 @@ comparable (`benchmark.py:195-207`). The report carries per-controller
 trajectory, attitude, command, telemetry, spikes, scans/angles, estimate and
 metrics, plus `stats` with the SNN−ANN delta and a ranking (`benchmark.py:234-340`).
 
-## 8. Limits and gains
+## 8. Safety layer
+
+There is **no independent safety layer**. Safety in these runs comes only from
+(i) clipping the acceleration demand to `action_limit`, (ii) the plant's
+rotor/thrust/current saturation ([physics.md](physics.md)), and (iii) the
+operator bounds on the interactive goal. The learned `snn`/`field_snn` provide
+**no** safety guarantee — they are one learned component inside the structured
+loop. An explicit limiter / recovery layer that can override or blend the
+learned output is future work (see [limitations.md](limitations.md)).
+
+## 9. Limits and gains
 
 | Quantity | Value | Source |
 |---|---|---|
@@ -159,7 +181,12 @@ metrics, plus `stats` with the SNN−ANN delta and a ranking (`benchmark.py:234-
 | PID | `omega_n=3.5, zeta=0.85` | `control.py:179-180` |
 | Action limits | teacher 20, others `control_limit` | `control.py:57,183`, `cli.py:74-96` |
 
-## 9. Schematics
+`CONTROL_LIMIT` (12 m/s²) exceeds the instantaneous thrust envelope
+(≈7.8 m/s²), so demands can saturate; there is no explicit anti-windup. The DS
+bandwidth, impedance poles (1.2 and 4.5 s⁻¹) and attitude loop (≈6 rad/s) are
+only a few times apart, so the time-scale-separation assumption is weak.
+
+## 10. Schematics
 
 - [assets/schematics/control-execution.svg](assets/schematics/control-execution.svg)
   — `make_controller` dispatch plus the per-frame `plant → sensors → UKF →

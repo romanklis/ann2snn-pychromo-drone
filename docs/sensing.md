@@ -103,7 +103,10 @@ for the defaults (`sensor.py:40-42`, `policy.py:75-77`). Here $e = p - r$ and
 $\dot e = v - \dot r$ are the tracking errors, and `u_ff` is the reference
 feed-forward (zero for the constant-goal task). The scan is a horizontal slice
 of the 2.5-D geometry, so the same code becomes a 3-D slice later
-(`sensor.py:1-8`).
+(`sensor.py:1-8`). Two simplifications to keep in mind: the beams are cast at
+**world-fixed** angles (not body-yaw-relative) — `scan()` uses `config.angles()`
+and the world position — and obstacle height is ignored, so a drone flying above
+a pillar is avoided as if at ground level.
 
 ## 5. Scenes and presets
 

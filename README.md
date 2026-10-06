@@ -57,7 +57,11 @@ recurrent steps per frame; the SNN runs 10 IF micro-steps per frame with
 `v_th=1.0`. Policy input is **sensor-conditioned**,
 `[e(3), ė(3), u_ff(3), LiDAR ranges(32), cues(5)] = 46` → 3 accel commands (or
 `K=24` field coefficients for the structured arms). Inference is **numpy only**
-at runtime; torch is used only to distil (in a separate training image).
+at runtime; torch is used only to distil (in a separate training image). The SNN
+is a *rate-coded finite-window approximation* of the ANN — not a lossless
+transfer — and there is **no independent safety layer**: safety comes only from
+command clipping and plant saturation, never from the network. See
+[docs/limitations.md](docs/limitations.md) for per-claim status.
 
 ## Quick start
 
@@ -88,9 +92,12 @@ in this base image (the live window is fine).
 
 ### Expected results
 
-`ds_guidance` → `collisions=0`, `clearance_min_m>0`, `reached_goal=true`;
-`pid` → `collisions>0`, `clearance_min_m<0`. The distilled `ann`/`snn` should also
-clear the pillar and reach the goal; the dashboard reports the SNN−ANN delta.
+`pid` collides (`collisions>0`, `clearance_min_m<0`); `ds_guidance` and the
+structured `field_*` arms clear the obstacle on the evaluated scenes.
+Estimate-only, the DS teacher and the end-to-end `ann`/`snn` clear but often stop
+short of the 0.30 m goal tolerance — the dashboard reports `reached` and closest
+approach honestly rather than hiding it. Exact numbers:
+[docs/field.md §8](docs/field.md#8-measured-result).
 
 ## Obstacle avoidance (boxes + LiDAR)
 
@@ -165,10 +172,11 @@ The plant is the **hidden truth**; every controller — the DS teacher, PID and 
 learned ANN/SNN — sees only a fused state estimate. Each frame the loop runs
 `plant → sensors → UKF → controller`:
 
-- **Sensors** (`sensors.py`): GPS position (10 Hz, bias/dropouts), IMU specific
-  force + gyro (50 Hz, biases/noise/outliers), INS velocity/attitude, barometer
-  altitude, compass heading, and the LiDAR scan — with a seeded RNG for
-  determinism.
+- **Sensors** (`sensors.py`): GPS position (10 Hz, noise/dropouts — no bias
+  term), IMU specific force + gyro (50 Hz, biases/noise/outliers; the specific
+  force is the true body-frame non-gravitational force, so gravity is not
+  measurable), INS velocity/attitude, barometer altitude, compass heading, and
+  the LiDAR scan — with a seeded RNG for determinism.
 - **UKF** (`estimator.py`): error-state (multiplicative) unscented filter over
   `[p, v, quaternion, ω, rotor speeds, accel/gyro biases]`; the process model is a
   simplified nonlinear quad (attitude kinematics, thrust mapping, rotor
@@ -183,9 +191,12 @@ labels on the estimate), so training matches deployment. The bundle fingerprint
 records the sensor suite + estimator config.
 
 **Honest limitation:** estimate-only control is harder than the truth-based demo.
-With the current estimator the teacher and ANN clear the pillar and approach the
-goal, but the closed loop orbits a little short of the 0.30 m tolerance, and the
-SNN can graze the pillar — improved estimator/DS tuning is follow-up work.
+With the current estimator the teacher and ANN clear the pillar but the closed
+loop orbits short of the 0.30 m tolerance. The estimator is deliberately simpler
+than the plant (50 ms rotor lag, truth-plus-noise INS, GPS σ ≈ the goal
+tolerance); it models the thrust + H-drag + fuselage-drag specific force but not
+the rotor in-flow loss. See [docs/limitations.md](docs/limitations.md) for the
+full per-claim status.
 
 ## Structured SNN field + DS modulation
 
@@ -215,17 +226,41 @@ LiDAR (k ranges + cues)
 - `tools/field_viz.py` / `make field-viz` — a self-contained Plotly HTML showing
   the LiDAR, learned `U_obs`/`F_obs`, nominal vs modulated DS and the trajectory.
 
-Result (estimate-only, `make compare SCENE=pillar`): the structured field nets are
-collision-free **and reach the goal**, with ~9× fewer parameters than the
-end-to-end SNN/ANN (which under-fit):
+Result (estimate-only, `make compare`, 500 steps, seed 0). `pillar`:
 
 ```
 controller  coll  clr_min   final  reach  params
-ann            0    0.597   0.308  False   89000
-snn            0    0.727   1.944  False   89000
-field_ann      0    0.228   0.252   True    9984
-field_snn      0    0.229   0.251   True    9984
+ds_guidance    0    0.019   1.317  False       -
+pid           11   -0.223   0.106   True       -
+ann            0    0.133   0.772  False   89000
+snn            0    0.061   0.812  False   89000
+field_ann      0    0.338   0.073   True    9984
+field_snn      0    0.114   0.098   True    9984
 ```
+
+The structured field arms now split roles (plan D): a **global A\* planner**
+provides the path-tracking guidance `v_nom`, and the **LiDAR field is a gated
+local residual** trained by gradient matching to the teacher field. This fixed
+the previously reported failures — `wall` went from 44/42 collisions to **0** and
+`slalom` from 28/11 to **0**, with the field arms reaching on 7 of 8
+scene/arm combinations. The end-to-end `ann`/`snn` baselines are unchanged and
+still fail on `wall`/`slalom`. Caveats: the planner uses the privileged scene
+(a map), and the field **SNN** transfer fidelity is low (Pearson ≈0.45 after
+readout calibration), so its residual is coarse. Per-scene table and per-claim
+status: [docs/field.md §8](docs/field.md#8-measured-result) and
+[docs/limitations.md](docs/limitations.md).
+
+## SLAM-lite map (dashboard)
+
+The hero dashboard's right column shows **"SLAM map · what the drone knows"**:
+an occupancy grid built online from the LiDAR + the UKF pose, drawn top-down with
+the ground-truth obstacle outline overlaid, plus live metrics (explored %,
+surface coverage, IoU, replans, first goal-path frame). A header **map** selector
+switches between `SLAM` (the live map) and `truth` (the privileged scene). Under
+SLAM the A\* planner consumes the live map, replans, and visits frontiers until a
+goal route appears. On the four preset scenes the map-based runs stay
+collision-free and reach the goal; see [docs/slam.md](docs/slam.md). `POST
+/api/benchmark` accepts `"map_source": "truth" | "slam"`.
 
 ## Weights and training
 
@@ -255,10 +290,17 @@ in the dashboard image (`docker run --rm --entrypoint sh drone6dof-dashboard
 - `tests/test_connectome.py` — topology determinism, Dale's law, E/I fraction,
   degree, ANN/SNN shapes, IF invariants.
 - `tests/test_weights.py` — bundle loads, shape checks, fingerprint/missing guard.
-- `tests/test_snn_parity.py` — numpy ANN matches the torch reference; SNN tracks
-  the ANN (gain/r²) — no torch needed.
-- `tests/test_end_to_end.py` — DS clears and reaches the goal; PID collides;
-  ANN/SNN clear and reach; CSV export shape.
+- `tests/test_snn_parity.py` — numpy ANN matches the torch reference; the
+  rate-coded SNN is scored with MAE/RMSE/NRMSE/R²/Pearson/cosine/gain and the
+  error-vs-micro-step-window check (`tools/snn_transfer_eval.py`) — no torch.
+- `tests/test_estimator.py` — UKF tracking/determinism, covariance
+  positive-definiteness, zero-bias-initialisation stability.
+- `tests/test_imu_model.py` — the accelerometer reads body specific force
+  (~1g at hover, regression guard against the old ~2g model).
+- `tests/test_ds_stability.py` — nominal-DS eigenvalues and Lyapunov argument.
+- `tests/test_control.py` — controller saturation and plant numerical robustness.
+- `tests/test_end_to_end.py` — DS clears; PID collides; ANN/SNN clear (goal
+  reach reported honestly); CSV export shape.
 - `tests/test_benchmark.py` — dashboard report contract.
 - `tests/test_viz_smoke.py` — builds the Chrono scene and renders one frame.
 - `server/tests/test_api.py` — health, catalogue, simulate, benchmark, static.
@@ -299,7 +341,8 @@ per-frame data flow.
 
 ```
 src/drone6dof/       plant, estimator (UKF), sensors, controllers
-                     (ds/pid/ann/snn/field_ann/field_snn), field, policy, geometry,
+                     (ds/pid/ann/snn/field_ann/field_snn), planner (A*), guidance,
+                     slam (occupancy mapper), field, policy, geometry,
                      scene/reference/task, weights, train, sim, benchmark, viz, cli
 server/              Flask API (app.py, wsgi.py) + tests
 web/                 Vite + Plotly frontend (hero + extended)

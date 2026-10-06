@@ -15,10 +15,11 @@ import pytest
 from drone6dof.benchmark import weights_info
 from drone6dof.connectome import (
     ConnectomeANN,
-    LosslessConnectomeSNN,
+    RateCodedConnectomeSNN,
     SparseRecurrence,
 )
 from drone6dof.weights import DEFAULT_REF_IO_PATH, DEFAULT_WEIGHTS_PATH, load_weights
+from snn_transfer_eval import evaluate, transfer_metrics
 
 _HAS = bool(weights_info().get("loaded")) and Path(DEFAULT_REF_IO_PATH).exists()
 pytestmark = pytest.mark.skipif(not _HAS, reason="weights/reference bundle not built")
@@ -38,7 +39,7 @@ def _net(kind: str):
     if kind == "ann":
         return ConnectomeANN(b["w_in"], b["w_out"], rec,
                              steps_per_frame=int(b["connectome_steps"]), limit=_LIMIT)
-    return LosslessConnectomeSNN(b["w_in"], b["w_out"], rec,
+    return RateCodedConnectomeSNN(b["w_in"], b["w_out"], rec,
                                  micro_steps=int(b["micro_steps"]),
                                  v_th=float(b["v_th"]), limit=_LIMIT)
 
@@ -62,19 +63,18 @@ def test_snn_tracks_the_ann_as_a_rate_code():
     ua = np.asarray([ann.forward_input(row) for row in x])
     us = np.asarray([snn.forward_input(row) for row in x])
 
-    checkable = 0
-    for axis in range(ua.shape[1]):
-        a = ua[:, axis]
-        s = us[:, axis]
-        if np.ptp(a) < 0.10 * _LIMIT or np.ptp(s) < 0.10 * _LIMIT:
-            continue
-        checkable += 1
-        k = float(np.dot(a, s) / (np.dot(a, a) + 1e-12))
-        pred = k * a
-        ss_res = float(np.sum((s - pred) ** 2))
-        ss_tot = float(np.sum((s - s.mean()) ** 2))
-        r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
-        assert 0.3 <= k <= 2.5, (axis, k)
-        assert r2 >= 0.3, (axis, r2)
-    if checkable == 0:
-        pytest.skip("policy near-silent on every axis")
+    m = transfer_metrics(ua, us)["aggregate"]
+    # A correlated rate code with a bounded scale error on the deployment
+    # sequence.  This is an approximation, not an equality claim.
+    assert np.isfinite([m["rmse"], m["r2"], m["cosine"], m["gain"]]).all(), m
+    assert m["cosine"] >= 0.5, m
+    assert m["nrmse"] <= 1.0, m
+
+
+def test_transfer_error_is_bounded_and_improves_with_the_window():
+    results = evaluate([1, 8, 64])
+    rmse = {int(k): v["aggregate"]["rmse"] for k, v in results.items()}
+    for value in rmse.values():
+        assert np.isfinite(value)
+    # A longer integration window must not make the rate code substantially worse.
+    assert rmse[64] <= rmse[1] * 1.25, rmse

@@ -17,7 +17,7 @@ to integer periods in frames (`sensors.py:53-54`).
 
 | Channel | Rate (default) | Model (default) |
 |---|---|---|
-| IMU specific force | 50 Hz | $\tilde f_b = R^\top(a - g) + b_a + \mathcal N(0,\sigma_a^2)$, outliers at 1 % scaled ×8 |
+| IMU specific force | 50 Hz | $\tilde f_b = f_b^\text{plant} + b_a + \mathcal N(0,\sigma_a^2)$, outliers at 1 % scaled ×8 (true body specific force; gravity not measurable) |
 | IMU gyro | 50 Hz | $\tilde\omega = \omega + b_g + \mathcal N(0,\sigma_g^2)$, outliers at 1 % |
 | GPS position | 10 Hz | $\tilde p = p + \mathcal N(0,\sigma_p^2)$, 5 % dropout |
 | INS velocity | 50 Hz | $\tilde v = v + \mathcal N(0,\sigma_v^2)$ |
@@ -30,8 +30,12 @@ Defaults (`sensors.py:30-51`): $\sigma_p = 0.25$ m, $\sigma_v = 0.08$,
 $\sigma_\theta = 0.02$ rad, $\sigma_a = 0.12$ m/s², $\sigma_g = 0.015$ rad/s,
 $\sigma_b = 0.25$ m, $\sigma_m = 0.04$ rad; accelerometer bias
 $(0.05,-0.04,0.06)$, gyro bias $(0.012,-0.010,0.008)$; seeded RNG for
-determinism. The IMU specific force uses the true thrust
-$T = C_T\sum_k \omega_{m,k}^2$ (`sensors.py:135-146`).
+determinism. The IMU specific force is the plant's **true body-frame specific
+force** (thrust + rotor in-flow loss + in-plane H-drag + fuselage drag), passed
+through `truth["specific_force_body"]` (`sensors.py:135-151`; see
+[physics.md](physics.md#10-specific-force-ideal-accelerometer)). Gravity is not
+included — an accelerometer cannot measure it — so a level hover reads `+g`
+along body z.
 
 The controller receives an `Observation` carrying the estimate plus the LiDAR
 scan (`sensors.py:85-93`).
@@ -77,6 +81,13 @@ $$
 The matrix square root uses Cholesky with an eigen-decomposition fallback
 (`estimator.py:237-241`).
 
+**Numerical note.** At $\alpha=0.3$ the central weights are large and negative
+($W_0^m\approx-10.1$, $W_0^c\approx-7.2$ for $n=22$), so the weighted covariance
+sum can lose positive-definiteness. The filter therefore projects $P$ onto the
+PSD cone (eigenvalue floor at $10^{-9}$) after predict and update and exposes
+the smallest eigenvalue via `telemetry()['min_eig']`. This is a guard, not a
+re-tuning: the default $\alpha$ is unchanged so results stay comparable.
+
 ## 4. Predict (process model)
 
 The process model is a deliberately **simplified** nonlinear quad driven by the
@@ -114,7 +125,7 @@ functions match the sensor models (`estimator.py:268-296`):
 
 $$
 h_\text{gps}=p,\quad
-h_\text{acc}=\frac{T}{m}(0,0,1) - R^\top g + b_a,\quad
+h_\text{acc}=\frac{T}{m}(0,0,1) + \frac{F_H+F_\text{drag}}{m} + b_a,\quad
 h_\text{gyro}=\omega+b_g,\quad
 h_\text{ins,v}=v,\quad
 h_\text{ins,att}=\text{rpy}(R),\quad
@@ -144,15 +155,45 @@ Initial covariance and process noise are `estimator.py:136-145` and
 `estimator.py:221-230` (position 1e-4, velocity 5e-3, attitude 1e-4, rates
 2e-3, rotor 1e-1, accel bias 1e-6, gyro bias 1e-7, all diagonal).
 
-## 6. Honest limitation
+Two robustness gaps are documented rather than hidden: Euler-angle measurements
+(INS attitude, compass yaw) form innovations directly **without wrap-around
+handling**, which is acceptable only for the small attitude excursions here; and
+a single-frame outlier is **not gated** (see above). Finally, `reset()`
+initialises $b_a,b_g$ to the **true simulated biases** (`estimator.py:134-135`)
+— a *privileged/favourable* initialisation, not an unknown-bias one.
+`tests/test_estimator.py::test_ukf_zero_bias_initialisation_is_stable` exercises
+the harder zero-bias case.
+
+## 6. Estimator / plant model mismatches
+
+The estimator is intentionally simpler than the plant; the mismatches are real
+and are the honest explanation for part of the residual tracking error:
+
+| Effect | Estimator | Plant / sensor |
+|---|---|---|
+| Accelerometer | thrust + in-plane H-drag + fuselage drag, `h_acc = (T/m)ẑ + (F_H+F_drag)/m + b_a` | true specific force adds rotor in-flow loss and `thrust_min` (residual mismatch) |
+| Rotor lag | first-order, `rotor_tau = 0.05 s` | electrical `tau_e = 0.002 s` (≈2–4 ms) |
+| Gravity in IMU | excluded (correct) | excluded; attitude comes from INS/compass/gyro, not the accelerometer |
+| INS velocity/attitude | truth + white noise | realistic INS is filtered/correlated; compass yaw duplicates INS yaw |
+| GPS | $\sigma_p=0.25$ m | comparable to the 0.30 m goal tolerance |
+
+The estimator mirrors the plant's in-plane H-drag and fuselage drag, so the
+residual accelerometer mismatch is the rotor **in-flow loss** and `thrust_min`;
+the filter stays bounded and finite ([EMPIRICALLY VALIDATED]) and tracks the
+plant to ~0.12 m position RMSE on the shipped run. The estimate-only loop still
+orbits short of the goal tolerance — a closed-loop robustness property of the
+marginal DS under small estimate error, not a filter divergence.
+
+## 7. Honest limitation
 
 Estimate-only control is harder than a truth-based demo. With the current
-estimator the teacher and the ANN clear the pillar and approach the goal, but the
-closed loop orbits a little short of the 0.30 m tolerance and the SNN can graze
-the pillar. Improving the estimator / DS tuning is follow-up work
-(`README.md`, "State estimation").
+estimator the teacher and the ANN clear the pillar but the closed loop orbits
+short of the 0.30 m tolerance (the eval-only benchmark is reported honestly in
+[field.md](field.md#8-measured-result)). Improving the estimator / DS tuning is
+follow-up work. The SNN's clearance is reported per run rather than claimed to
+"graze" universally.
 
-## 7. Schematics
+## 8. Schematics
 
 - [assets/schematics/ukf.svg](assets/schematics/ukf.svg) — nominal state +
   22-D error covariance, sigma-point predict, stacked-measurement update.

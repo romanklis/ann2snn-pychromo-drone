@@ -11,9 +11,13 @@ from drone6dof.config import CONTROL_LIMIT, INIT_STATE, build_scene, preset_scen
 from drone6dof.field import (
     FieldConfig,
     PotentialBasis,
+    fit_field_coeffs,
+    gate,
+    goal_fade,
     modulate_ds,
     nominal_ds,
     teacher_coeffs,
+    teacher_grad,
     teacher_potential,
 )
 from drone6dof.geometry import BoxObstacle
@@ -66,6 +70,55 @@ def test_modulation_is_identity_without_field():
     assert near[0] == pytest.approx(0.0, abs=1e-9)  # radial push into obstacle removed
 
 
+def test_normalized_rbf_denominator_underflow_is_safe():
+    # Far from every centre the normaliser underflows; the basis must return a
+    # finite zero rather than 0/0.
+    cfg = FieldConfig()
+    basis = PotentialBasis(cfg)
+    centers = np.full((cfg.k, 3), 1.0e3)
+    p = np.zeros(3)
+    assert basis.eval_U(np.ones(cfg.k), p, centers) == 0.0
+    assert np.allclose(basis.grad_U(np.ones(cfg.k), p, centers), np.zeros(3))
+    assert np.isfinite(basis.grad_U(np.ones(cfg.k), p, centers)).all()
+
+
+def test_fit_field_coeffs_matches_the_teacher_gradient():
+    cfg = FieldConfig()
+    basis = PotentialBasis(cfg)
+    scene = preset_scene("pillar")
+    # a point within the pillar's influence radius
+    p = np.array([-1.55, 0.0, 0.5])
+    centers = basis.centers(p, scene.goal_np)
+    a = fit_field_coeffs(scene, p, centers, cfg)
+    assert a.shape == (cfg.k,)
+    assert np.all(a >= 0.0) and np.all(a <= cfg.field_limit)
+    got = basis.grad_U(a, p, centers)
+    want = teacher_grad(scene, p, cfg)
+    assert float(got[:2] @ want[:2]) > 0.0          # same general direction
+    cos = float(got[:2] @ want[:2]) / (np.linalg.norm(got[:2]) * np.linalg.norm(want[:2]) + 1e-9)
+    assert cos > 0.5, cos
+
+
+def test_fit_field_coeffs_is_zero_far_from_obstacles():
+    cfg = FieldConfig()
+    basis = PotentialBasis(cfg)
+    scene = preset_scene("pillar")
+    p = np.array([2.5, 2.5, 2.5])
+    centers = basis.centers(p, scene.goal_np)
+    a = fit_field_coeffs(scene, p, centers, cfg)
+    assert np.allclose(a, 0.0)
+
+
+def test_gate_and_goal_fade():
+    cfg = FieldConfig()
+    assert gate(0.0, cfg) == pytest.approx(1.0, abs=1e-6)      # touching
+    assert gate(cfg.r_influence + 1.0, cfg) == 0.0             # free space
+    assert gate(cfg.r_influence, cfg) == 0.0
+    assert goal_fade(0.1) == 0.0                               # inside tolerance
+    assert goal_fade(1.0) == 1.0                               # far from goal
+    assert 0.0 < goal_fade(0.5) < 1.0
+
+
 def test_field_bundle_has_fewer_parameters():
     from drone6dof.benchmark import field_weights_info, weights_info
     from drone6dof.weights import load_field_weights, load_weights
@@ -94,8 +147,9 @@ def test_field_ann_matches_torch_reference():
     net = ConnectomeANN(b["w_in"], b["w_out"], rec,
                         steps_per_frame=int(b["connectome_steps"]),
                         limit=float(b["field"].get("field_limit", 2.0)))
-    out = np.asarray([np.clip(net.forward_input(row), 0.0, b["field"].get("field_limit", 2.0))
-                      for row in np.asarray(io["inputs"])])
+    # reference `ann_out` is the raw runtime ANN output (the controller clips to
+    # [0, field_limit] afterwards), so compare without clipping.
+    out = np.asarray([net.forward_input(row) for row in np.asarray(io["inputs"])])
     assert np.allclose(out, np.asarray(io["ann_out"]), atol=1e-4)
 
 

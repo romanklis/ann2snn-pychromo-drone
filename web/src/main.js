@@ -1,6 +1,7 @@
 import { getControllers, getHealth, runBenchmark } from "./api.js";
 import { DEFAULT_SELECTION, SHORT, colorOf, DEFAULT_GOAL, readGoal, writeGoal, goalError, readScene, writeScene } from "./runparams.js";
 import { buildStage, updateStage } from "./stage.js";
+import { drawSlamMap, firstSlamResult } from "./slamviz.js";
 import { drawRasters, activeChannelCount } from "./raster.js";
 import { lineChart, setCursor } from "./chart.js";
 
@@ -24,6 +25,7 @@ const state = {
   pathSet: [],
   rasterChannels: 200,
   lastStageMs: 0,
+  mapSource: "slam",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -43,7 +45,8 @@ async function boot() {
   }
   await refresh();
   $("play").addEventListener("click", togglePlay);
-  renderPipeline();
+  buildMapSourceSelect();
+  renderSlam();
   initGoal();
   initKeyboard();
   requestAnimationFrame(tick);
@@ -166,6 +169,7 @@ async function refresh() {
       seed: state.seed,
       goal: state.goal,
       scene: state.scene,
+      mapSource: state.mapSource,
     });
   } catch (err) {
     $("resultbar").textContent = `benchmark failed: ${err.message}`;
@@ -347,6 +351,7 @@ function renderAll() {
   paintSpikes(r, null);
   renderCharts();
   renderResultBar();
+  renderSlam();
 }
 
 function renderCharts() {
@@ -373,12 +378,56 @@ function renderCharts() {
   });
 }
 
-function renderPipeline() {
-  $("pipeline").innerHTML = `
-    <div class="pipe-row"><span class="node">PLANT</span><span class="arrow">→</span>
-      <span class="node">POLICY π(e)</span><span class="arrow">→</span><span class="node">u (m/s²)</span></div>
-    <div class="pipe-note">e = x − r (true state). The ANN→SNN weight transfer is <b>offline</b>:
-      the SNN is not a second policy, it is the same connectome expressed as a spike rate.</div>`;
+function buildMapSourceSelect() {
+  const sel = $("map-source");
+  if (!sel) return;
+  sel.value = state.mapSource;
+  sel.addEventListener("change", () => {
+    state.mapSource = sel.value;
+    withBusy("computing", () => refresh());
+  });
+}
+
+function renderSlam() {
+  const r = state.report;
+  const res = r ? firstSlamResult(r) : null;
+  const note = $("slam-note");
+  const metrics = $("slam-metrics");
+  const pipe = $("slam-pipe");
+  if (pipe) {
+    pipe.innerHTML = `<div class="pipe-row"><span class="node">LiDAR</span>
+      <span class="arrow">→</span><span class="node">SLAM map</span>
+      <span class="arrow">→</span><span class="node">A* v_nom</span>
+      <span class="arrow">→</span><span class="node">field</span>
+      <span class="arrow">→</span><span class="node">u</span></div>`;
+  }
+  if (!res) {
+    if (note) note.textContent = `map: ${state.mapSource}`;
+    if (metrics) metrics.innerHTML = state.mapSource === "truth"
+      ? `<span class="dim">ground-truth map (no mapping). Switch <b>map</b> to SLAM to see discovery.</span>`
+      : `<span class="dim">no map in this report.</span>`;
+    const canvas = $("slam-map");
+    if (canvas && r) drawSlamMap(canvas, r, state.cursor);
+    return;
+  }
+  if (note) note.textContent = `map: SLAM · ${res.controller}`;
+  updateSlamMetrics(res);
+  drawSlamMap($("slam-map"), r, state.cursor);
+}
+
+function updateSlamMetrics(res) {
+  const el = $("slam-metrics");
+  if (!el || !res.slam) return;
+  const s = res.slam;
+  const ex = s.explored_frac && s.explored_frac.length
+    ? s.explored_frac[Math.min(state.cursor, s.explored_frac.length - 1)] : 0;
+  const found = s.path_found_step >= 0 ? `step ${s.path_found_step}` : "—";
+  el.innerHTML = `
+    <div class="pipe-row"><span class="node">explored</span> ${(ex * 100).toFixed(0)}%
+      &nbsp;·&nbsp; <span class="node">surface</span> ${(s.surface_coverage * 100).toFixed(0)}%
+      &nbsp;·&nbsp; <span class="node">IoU</span> ${s.iou_vs_truth.toFixed(2)}
+      &nbsp;·&nbsp; <span class="node">replans</span> ${s.replans}
+      &nbsp;·&nbsp; <span class="node">goal path</span> ${found}</div>`;
 }
 
 function renderResultBar() {
@@ -441,6 +490,11 @@ function paintCursor() {
   if (now - state.lastStageMs > 45) {
     updateStage($("stage"), r, stageRefs, state.cursor, vizOpts());
     paintSpikes(r, state.cursor);
+    const res = firstSlamResult(r);
+    if (res && res.map) {
+      drawSlamMap($("slam-map"), r, state.cursor);
+      updateSlamMetrics(res);
+    }
     const cx = ref ? ref.t[Math.min(state.cursor, ref.t.length - 1)] : null;
     for (const id of ["ctrl-chart", "track-chart", "clear-chart"]) setCursor($(id), cx);
     state.lastStageMs = now;

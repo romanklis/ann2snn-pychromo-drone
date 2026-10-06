@@ -94,6 +94,8 @@ canvas#raster { width: 100%; background: #0b0f14; border-radius: 4px; display: b
 .node { padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px; background: #0e141d; }
 .arrow { color: var(--accent); }
 .pipe-note { margin-top: 6px; color: var(--muted); font-size: 11px; }
+#slam-map { width: 100%; height: auto; display: block; border: 1px solid var(--line); border-radius: 6px; background: #0b1017; image-rendering: pixelated; margin-bottom: 6px; }
+.dim { color: var(--muted); }
 
 .resultbar { position: relative; z-index: 1; border-top: 1px solid var(--line); background: var(--panel2); padding: 6px 14px; }
 .result-title { font-size: 10px; letter-spacing: 1px; color: var(--muted); }

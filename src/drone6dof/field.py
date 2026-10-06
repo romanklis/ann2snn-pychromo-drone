@@ -28,6 +28,9 @@ __all__ = [
     "teacher_potential",
     "teacher_grad",
     "teacher_coeffs",
+    "fit_field_coeffs",
+    "gate",
+    "goal_fade",
     "modulate_ds",
     "trajectory_cost",
     "eval_grid",
@@ -155,6 +158,19 @@ class PotentialBasis:
     def eval_batch(self, coeffs: np.ndarray, points: np.ndarray, centers: np.ndarray) -> np.ndarray:
         return np.asarray([self.eval_U(coeffs, p, centers) for p in np.asarray(points)])
 
+    def grad_matrix(self, point: np.ndarray, centers: np.ndarray) -> np.ndarray:
+        """``(3, K)`` matrix ``M`` with ``grad_U(a) = M @ a`` (linear in ``a``)."""
+        phi, s, d = self._weights(point, centers)
+        k = len(centers)
+        if s < 1e-12:
+            return np.zeros((3, k))
+        dphi = phi[:, None] * (d / self.sigma ** 2)          # (K, 2) = d(phi_k)/dx
+        dS = dphi.sum(axis=0)                                # (2,)
+        m = dphi / s - phi[:, None] * dS[None, :] / (s * s)  # (K, 2) = grad(phi_k/s)
+        out = np.zeros((3, k))
+        out[:2, :] = m.T
+        return out
+
 
 def _barrier(d: float, r_influence: float) -> float:
     return 0.5 * max(0.0, r_influence - d) ** 2
@@ -190,6 +206,38 @@ def teacher_coeffs(scene, state, config: Optional[FieldConfig] = None) -> np.nda
     goal = np.asarray(getattr(scene, "goal_np", np.zeros(3)), dtype=np.float64)
     centers = PotentialBasis(config).centers(state, goal)
     return np.asarray([teacher_potential(scene, c, config) for c in centers])
+
+
+def fit_field_coeffs(
+    scene, point, centers, config: Optional[FieldConfig] = None
+) -> np.ndarray:
+    """Non-negative coefficients whose gradient best matches ``∇U*`` at ``point``.
+
+    Gradient matching (not value matching): the controller consumes ``−∇U``, so
+    the target is the teacher gradient ``∇U*`` at the evaluation point.  The
+    normal equations are under-determined (``K`` coefficients, 2 equations), so
+    the min-norm least-squares solution is used and clipped to be non-negative.
+    """
+    config = config or FieldConfig()
+    basis = PotentialBasis(config)
+    m = basis.grad_matrix(np.asarray(point, dtype=np.float64), centers)
+    target = teacher_grad(scene, point, config)
+    if not np.any(target[:2]):
+        return np.zeros(len(centers))
+    a, *_ = np.linalg.lstsq(m[:2], target[:2], rcond=None)
+    return np.clip(a, 0.0, config.field_limit)
+
+
+def gate(min_range: float, config: Optional[FieldConfig] = None) -> float:
+    """Distance gate: 0 in free space (``min_range ≥ r_influence``), 1 close in."""
+    config = config or FieldConfig()
+    return float(np.clip((config.r_influence - float(min_range))
+                         / (config.r_influence + _EPS), 0.0, 1.0))
+
+
+def goal_fade(dist_goal: float, snap: float = 0.30, hold: float = 0.80) -> float:
+    """Goal-capture fade: 0 inside the goal tolerance, 1 beyond ``hold``."""
+    return float(np.clip((float(dist_goal) - snap) / (hold - snap + _EPS), 0.0, 1.0))
 
 
 def modulate_ds(v_nom: np.ndarray, f_obs: np.ndarray, config: Optional[FieldConfig] = None) -> np.ndarray:

@@ -24,6 +24,8 @@ as `assets/demo.mp4` with higher quality / smaller size).*
 | [sensing.md](sensing.md) | Obstacle geometry and the LiDAR scan + cues |
 | [field.md](field.md) | Potential-field methodology; structured ANN vs its SNN transfer |
 | [control.md](control.md) | Where the controllers live and how they are executed |
+| [slam.md](slam.md) | SLAM-lite mapping, replanning, and the "what the drone knows" panel |
+| [limitations.md](limitations.md) | Per-claim status and the honest list of limitations |
 
 Every equation and diagram cites the module and line it comes from, so the
 documentation tracks the code. The authoritative behavioural configuration is the
@@ -86,8 +88,8 @@ CLI/compare baseline and is hidden from the dashboard.
 | `pid` | classical PD + feed-forward baseline (collides with the pillar) | no | no | no |
 | `ann` | 1000-neuron sparse recurrent connectome ANN, distilled from the teacher | yes | no | yes |
 | `snn` | integrate-and-fire transfer of the connectome ANN | yes | yes | yes |
-| `field_ann` | small ANN → trajectory-anchored obstacle-field coefficients + DS | yes | no | yes |
-| `field_snn` | spiking transfer of the field ANN; never outputs control directly | yes | yes | yes |
+| `field_ann` | A* global path guidance + gated LiDAR obstacle-field residual (ANN) | yes | no | yes |
+| `field_snn` | spiking transfer of the field net; never outputs control directly | yes | yes | yes |
 
 See [control.md](control.md) for the dispatch and execution loop, and
 [field.md](field.md) for the two distinct uses of the connectome network.
