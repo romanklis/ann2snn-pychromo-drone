@@ -1,5 +1,12 @@
 # ANN2SNN 6-DoF drone in PyChrono
 
+[![repo](https://img.shields.io/badge/github-ann2snn--pychrono--drone-181717?logo=github)](https://github.com/romanklis/ann2snn-pychrono-drone)
+[![docs](https://img.shields.io/badge/docs-src--cited-22b8a6)](docs/index.md)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![python](https://img.shields.io/badge/python-3.11-3776AB)](https://www.python.org)
+[![runtime](https://img.shields.io/badge/runtime-docker-2496ED)](https://docs.docker.com)
+[![3-D](https://img.shields.io/badge/3--D-Project%20Chrono-c98a2b)](https://projectchrono.org)
+
 A self-contained, Dockerized port of the 6-DoF quadcopter example from the
 [ANN2SNN](https://github.com/romanklis/ANN2SNN) project (`drone-example` branch):
 a numpy plant with the analytic DS-guidance teacher, the PID baseline, the
@@ -25,6 +32,27 @@ Two surfaces, both Docker-only:
 
 *The interactive PyChrono view and the browser dashboard (`docs/assets/demo.mp4`
 is the higher-quality capture).*
+
+## Contents
+
+**Surfaces** — [Interactive Chrono view](#interactive-chrono-view) ·
+[Dashboard](#dashboard) · [Interactive goal](#interactive-goal)
+
+**Methods** — [Obstacle avoidance (LiDAR + field)](#obstacle-avoidance-boxes--lidar) ·
+[State estimation (UKF)](#state-estimation-ukf-estimate-only-control) ·
+[Structured SNN field + DS](#structured-snn-field--ds-modulation) ·
+[SLAM-lite map](#slam-lite-map-dashboard)
+
+**Project** — [Controllers](#controllers) · [Quick start](#quick-start) ·
+[Weights & training](#weights-and-training) · [Tests](#tests) · [CLI](#cli) ·
+[Architecture](#architecture) · [Layout](#layout) ·
+[Why a prebuilt PyChrono base image](#why-a-prebuilt-pychrono-base-image) ·
+[Out of scope](#out-of-scope) · [Attribution](#attribution)
+
+**Deep dives (`docs/`)** — [Architecture](docs/architecture.md) ·
+[Physics](docs/physics.md) · [Estimation](docs/estimation.md) ·
+[Sensing](docs/sensing.md) · [Field](docs/field.md) · [Control](docs/control.md) ·
+[SLAM](docs/slam.md) · [Limitations](docs/limitations.md)
 
 ## Documentation
 
