@@ -192,5 +192,9 @@ The frontend (`web/`) renders a Plotly 3-D stage, a spike raster and charts. See
 
 ## 7. Schematics
 
+![Drone control architecture: ANN-to-SNN learning and obstacle avoidance](assets/architecture.png)
+
+*The full control architecture (also on the [main README](../README.md)).*
+
 - [assets/schematics/architecture.svg](assets/schematics/architecture.svg) — this
   page's block diagram as replaceable artwork.

@@ -33,6 +33,12 @@ Two surfaces, both Docker-only:
 *The interactive PyChrono view and the browser dashboard (`docs/assets/demo.mp4`
 is the higher-quality capture).*
 
+![Drone control architecture: ANN-to-SNN learning and obstacle avoidance](docs/assets/architecture.png)
+
+*System architecture — global DS / A\* guidance, the local LiDAR obstacle field,
+the ANN→SNN transfer, and the UKF + PyChrono simulation loop. See
+[Architecture](docs/architecture.md) for the module-level detail.*
+
 ## Contents
 
 **Surfaces** — [Interactive Chrono view](#interactive-chrono-view) ·
@@ -47,7 +53,7 @@ is the higher-quality capture).*
 [Weights & training](#weights-and-training) · [Tests](#tests) · [CLI](#cli) ·
 [Architecture](#architecture) · [Layout](#layout) ·
 [Why a prebuilt PyChrono base image](#why-a-prebuilt-pychrono-base-image) ·
-[Out of scope](#out-of-scope) · [Attribution](#attribution)
+[Out of scope](#out-of-scope) · [Attribution](#attribution) · [Author](#author)
 
 **Deep dives (`docs/`)** — [Architecture](docs/architecture.md) ·
 [Physics](docs/physics.md) · [Estimation](docs/estimation.md) ·
@@ -411,3 +417,37 @@ recording, in-dashboard training, the dense ANN, and `pychrono.sensor` / ROS 2.
 Ported from the ANN2SNN project (`drone-example` branch, commit `bafe4cf`), MIT
 licensed. Container base image: `lucamarchiano/pychrono_simulator:1.0`. See
 `LICENSE` and `NOTICE` for full provenance.
+
+## Author
+
+**Roman Pawel Klis** — Senior Manager, TOGAF-certified Data Architect and AI
+Program Leader · PhD, ETH Zürich ·
+[LinkedIn](https://www.linkedin.com/in/roman-pawel-klis-3811994)
+
+12+ years across manufacturing, R&D and FMCG, bridging urgent business needs and
+complex technical execution. Selected work:
+
+- **Johnson Electric** — spearheaded the digital transformation of the global
+  manufacturing shop floor: authored the data/AI strategy, built the large-scale
+  organizational processes, and led global teams deploying AI initiatives
+  (GenAI, LLMs, predictive maintenance) that cut testing times by 60%.
+- **Philip Morris International** — during the global IQOS rollout, architected
+  the data pipelines and AI-driven analytical backends that let market research
+  and executive management capture, process and act on multi-market feedback in
+  near real time, under FDA-preparatory governance.
+
+**Core expertise**
+
+- **AI leadership & strategy** — digital transformation, Lean/Agile, offshore
+  team building, tech transfer.
+- **Advanced AI** — agentic AI, generative AI, LLM fine-tuning (RAG), computer
+  vision, predictive maintenance.
+- **Data architecture** — high-throughput ETL/ELT pipelines, Spark, Hadoop,
+  Azure/GCP, Docker/Kubernetes, IoT & sensor fusion.
+- **Governance** — ISO-compliant data regimes, high-security access controls,
+  FDA regulatory environments.
+
+Passionate about mentoring the next generation of tech talent — most recently by
+guiding the 1st-prize-winning team at the NASA Space Apps Challenge 2025 (Zurich).
+Open to connecting with peers, leaders and recruiters on senior data, AI
+leadership and R&D management roles.
