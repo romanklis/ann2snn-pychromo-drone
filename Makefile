@@ -16,6 +16,30 @@ STEPS       ?= 500
 PORT        ?= 8080
 COMPOSE     ?= docker-compose
 XVFB        ?= bash scripts/xvfb.sh
+REPAIR_ROOT     ?= out/repair
+REPAIR_BUNDLE   ?= weights/quad6dof_connectome.npz
+REPAIR_RESUME   ?=
+REPAIR_SCENARIO ?= goal_shift
+REPAIR_PROPOSER ?= template
+REPAIR_LLM_PROVIDER ?= openai
+REPAIR_CYCLES   ?= 4
+REPAIR_PRACTICE ?= 12
+REPAIR_STEPS    ?= 500
+REPAIR_UNSEEN   ?= 20
+REPAIR_UNSEEN_STEPS ?= 500
+REPAIR_REGRESSION ?= 6
+REPAIR_REGRESSION_STEPS ?= 500
+REPAIR_MAX_TURNS ?= 30
+REPAIR_MAX_TOOL_CALLS ?= 120
+REPAIR_MAX_PRACTICE_ROLLOUTS ?= 18
+RUN_ID          ?=
+
+# Optional local LLM credentials; .env is gitignored.  Variables are exported to
+# the docker command so `-e VAR` forwards them without printing the values.
+-include .env
+export REPAIR_LLM_API_KEY REPAIR_LLM_BASE_URL REPAIR_LLM_MODEL REPAIR_LLM_PROVIDER
+export REPAIR_LLM_TIMEOUT REPAIR_LLM_TEMPERATURE REPAIR_LLM_MAX_TOKENS
+export DEEPSEEK_API_KEY DEEPSEEK_BASE_URL DEEPSEEK_MODEL DEEPSEEK_TIMEOUT
 
 # working-tree mount + output volume; X11 bits only for GUI targets
 HOST_UID ?= $(shell id -u)
@@ -86,7 +110,11 @@ dashboard-build: ## build the dashboard image (node build + Flask)
 
 dashboard: ## build + run the comparison dashboard (http://localhost:$(PORT))
 	docker build -f Dockerfile.dashboard -t $(DASH_IMAGE) .
-	docker run --rm -p $(PORT):8080 $(DASH_IMAGE)
+	mkdir -p out
+	docker run --rm -p $(PORT):8080 \
+		-v $(CURDIR)/out:/app/out \
+		-e DRONE6DOF_REPAIR_ROOT=/app/out/repair \
+		$(DASH_IMAGE)
 
 dashboard-shell: ## shell in the dashboard image
 	docker run --rm -it --entrypoint sh $(DASH_IMAGE)
@@ -107,10 +135,56 @@ docker-interactive: ## run the interactive compose service (needs: xhost +local:
 docker-test: ## run the test compose service
 	$(COMPOSE) run --rm test
 
+repair-audit: ## baseline probe + white-space audit -> out/repair/
+	mkdir -p $(REPAIR_ROOT)
+	$(RUN) $(OUTVOL) $(TRAIN_IMAGE) python tools/repair.py --out-root /data/repair \
+		--bundle $(REPAIR_BUNDLE) audit --scenario $(REPAIR_SCENARIO) \
+		--practice-episodes $(REPAIR_PRACTICE) \
+		--practice-steps $(REPAIR_STEPS) --regression-episodes $(REPAIR_REGRESSION) \
+		--regression-steps $(REPAIR_REGRESSION_STEPS)
+
+repair: ## run the white-space repair loop (PROPOSER=template|random|llm)
+	mkdir -p $(REPAIR_ROOT)
+	$(RUN) $(OUTVOL) -e REPAIR_LLM_API_KEY -e REPAIR_LLM_MODEL -e REPAIR_LLM_BASE_URL \
+		-e DEEPSEEK_API_KEY -e DEEPSEEK_BASE_URL -e DEEPSEEK_MODEL \
+		-e DEEPSEEK_TIMEOUT -e REPAIR_LLM_PROVIDER -e REPAIR_LLM_TIMEOUT \
+		-e REPAIR_LLM_TEMPERATURE -e REPAIR_LLM_MAX_TOKENS \
+		$(TRAIN_IMAGE) python tools/repair.py --out-root /data/repair \
+		--bundle $(REPAIR_BUNDLE) run --scenario $(REPAIR_SCENARIO) \
+		$(if $(REPAIR_RESUME),--resume-run $(REPAIR_RESUME),) \
+		--proposer $(REPAIR_PROPOSER) --llm-provider $(REPAIR_LLM_PROVIDER) \
+		--cycles $(REPAIR_CYCLES) --practice-episodes $(REPAIR_PRACTICE) \
+		--practice-steps $(REPAIR_STEPS) --unseen-episodes $(REPAIR_UNSEEN) \
+		--unseen-steps $(REPAIR_UNSEEN_STEPS) \
+		--regression-episodes $(REPAIR_REGRESSION) \
+		--regression-steps $(REPAIR_REGRESSION_STEPS) \
+		--max-turns $(REPAIR_MAX_TURNS) \
+		--max-tool-calls $(REPAIR_MAX_TOOL_CALLS) \
+		--max-practice-rollouts $(REPAIR_MAX_PRACTICE_ROLLOUTS) \
+		--max-practice-per-call 6 --accept-epsilon 1e-6
+
+repair-llm: ## run the repair loop with the LLM proposer
+	$(MAKE) repair REPAIR_PROPOSER=llm
+
+repair-deepseek: ## run the repair loop with DeepSeek (DEEPSEEK_API_KEY)
+	$(MAKE) repair REPAIR_PROPOSER=llm REPAIR_LLM_PROVIDER=deepseek
+
+repair-runs: ## list repair runs under out/repair
+	$(RUN) $(OUTVOL) $(TRAIN_IMAGE) python tools/repair.py --out-root /data/repair runs
+
+repair-report: ## print a repair report (RUN_ID=repair-...)
+	$(RUN) $(OUTVOL) $(TRAIN_IMAGE) python tools/repair.py --out-root /data/repair \
+		report --run-id $(RUN_ID)
+
+repair-test: ## run the no-torch repair tests
+	$(RUN) $(IMAGE) python -m pytest -q tests/test_repair_core.py
+
 clean: ## remove host build artifacts and outputs
 	rm -rf out build dist .pytest_cache src/*.egg-info
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
 
 .PHONY: help build shell demo pid headless frames test test-fast compile \
 	train-image train train-field train-shell dashboard-build dashboard dashboard-shell \
-	compare field-viz docker-headless docker-interactive docker-test clean
+	compare field-viz docker-headless docker-interactive docker-test \
+	repair-audit repair repair-llm repair-deepseek repair-runs repair-report \
+	repair-test clean

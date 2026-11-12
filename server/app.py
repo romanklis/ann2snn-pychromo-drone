@@ -29,6 +29,11 @@ from drone6dof.config import (
 )
 from drone6dof.params import DT
 
+try:  # normal package import (gunicorn / pytest)
+    from .repair_api import repair_bp
+except ImportError:  # `python server/app.py` fallback
+    from server.repair_api import repair_bp
+
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 WEB_ROOT = Path(os.environ.get("DRONE6DOF_WEB_ROOT", _REPO_ROOT / "server" / "static"))
 
@@ -58,6 +63,7 @@ def _clamp_window(value, name: str):
 
 def create_app() -> Flask:
     app = Flask(__name__, static_folder=None)
+    app.register_blueprint(repair_bp)
 
     @app.get("/api/health")
     def health():
@@ -142,6 +148,11 @@ def create_app() -> Flask:
     @app.get("/extended.html")
     def extended():
         return send_from_directory(WEB_ROOT, "extended.html")
+
+    @app.get("/repair")
+    @app.get("/repair.html")
+    def repair():
+        return send_from_directory(WEB_ROOT, "repair.html")
 
     @app.get("/assets/<path:filename>")
     def assets(filename):

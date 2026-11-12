@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>drone6dof · white-space repair</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body class="repair">
+    <header>
+      <div class="brand">ANN2SNN · 6-DoF drone · white-space repair</div>
+      <div id="badges" class="badges"></div>
+      <div class="controls">
+        <span class="goal-label">run</span>
+        <select id="run-picker" class="goal-input run-picker"></select>
+        <button id="refresh">Refresh</button>
+        <span id="status" class="status"></span>
+        <span id="cycle-label" class="clock">cycle —</span>
+        <a class="link" href="/">← HERO</a>
+        <a class="link" href="/extended">EXTENDED ↗</a>
+      </div>
+    </header>
+
+    <main class="repair-main">
+      <aside class="repair-side">
+        <div class="card">
+          <h3>Run summary</h3>
+          <div id="summary" class="pipeline"></div>
+        </div>
+        <div class="card">
+          <h3>Auto-selection probe</h3>
+          <div id="probe" class="table repair-scroll"></div>
+        </div>
+        <div class="card">
+          <h3>Cycles <span class="note">click to inspect</span></h3>
+          <div id="cycle-table" class="table repair-scroll"></div>
+        </div>
+        <div class="card">
+          <h3>Failure taxonomy</h3>
+          <div id="failures" class="table"></div>
+        </div>
+      </aside>
+
+      <section class="repair-center">
+        <div class="card">
+          <h3>Success by cycle <span id="success-note" class="note"></span></h3>
+          <div id="success-chart" class="chart tall"></div>
+        </div>
+        <div class="card">
+          <h3>Cycle comparison <span id="compare-note" class="note"></span></h3>
+          <div class="repair-compare">
+            <div id="compare-metrics" class="chart tall"></div>
+            <div id="compare-3d" class="chart tall"></div>
+          </div>
+          <label class="pick"><input type="checkbox" id="show-rejected" /> show rejected cycles</label>
+          <div id="compare-legend" class="legend"></div>
+        </div>
+        <div class="card">
+          <h3>White space <span id="activity-note" class="note"></span></h3>
+          <canvas id="activity-strip" width="1000" height="80"></canvas>
+          <div id="activity-legend" class="legend"></div>
+        </div>
+        <div class="card">
+          <h3>Replay <span id="trace-note" class="note"></span></h3>
+          <div class="repair-replay">
+            <div id="replay-3d" class="chart tall"></div>
+            <div id="replay-chart" class="chart tall"></div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Weight delta <span id="weight-note" class="note"></span></h3>
+          <div id="weight-chart" class="chart"></div>
+          <div id="weight-table" class="table repair-scroll"></div>
+        </div>
+      </section>
+
+      <aside class="repair-side">
+        <div class="card">
+          <h3>Program</h3>
+          <div id="program" class="pipeline"></div>
+        </div>
+        <div class="card">
+          <h3>LLM transcript</h3>
+          <div id="transcript" class="transcript repair-scroll"></div>
+        </div>
+        <div class="card">
+          <h3>Final report</h3>
+          <div id="final" class="pipeline"></div>
+        </div>
+      </aside>
+    </main>
+    <script type="module" src="/src/repair.js"></script>
+  </body>
+</html>

@@ -37,6 +37,12 @@ This page states, per major claim, whether it is established and how. Labels:
   fidelity is lower still (Pearson ≈0.45, cosine ≈0.40 even after the readout
   calibration), so its residual is coarse. Exact ANN/SNN equivalence is
   **[NOT ESTABLISHED]**.
+- **[APPROXIMATION]** White-space repair (`docs/repair.md`) is empirical and
+  gradient-free. The estimate-only SNN and teacher often stop just short of the
+  0.30 m goal tolerance, so repair acceptance uses an explicit **near-goal**
+  radius (0.45 m) plus a progress term; strict `reached_goal` is reported
+  separately and is not silently loosened. This is a research repair, not a
+  safety guarantee.
 - **[APPROXIMATION]** The field target is **gradient-matched** to the teacher
   (`F* = −∇U*`) but value-only terms are gone; a full Sobolev/velocity loss is
   future work.

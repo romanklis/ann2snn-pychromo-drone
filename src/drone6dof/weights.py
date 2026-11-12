@@ -143,8 +143,25 @@ def default_fields(**overrides) -> Dict:
     return make_fields(**base)
 
 
-def save_weights(path, *, w_in, w_out, w_mag, edges, polarity, fields: Dict, **scalars) -> str:
-    """Write a bundle to ``path`` (``.npz``). Returns the path as ``str``."""
+def save_weights(
+    path,
+    *,
+    w_in,
+    w_out,
+    w_mag,
+    edges,
+    polarity,
+    fields: Dict,
+    bias=None,
+    repair: Optional[Dict] = None,
+    **scalars,
+) -> str:
+    """Write a bundle to ``path`` (``.npz``). Returns the path as ``str``.
+
+    ``bias`` and ``repair`` are optional repair metadata.  They are deliberately
+    *not* part of ``fields``: the base fingerprint must stay valid so a repaired
+    bundle still loads through the normal controller path.
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -156,6 +173,10 @@ def save_weights(path, *, w_in, w_out, w_mag, edges, polarity, fields: Dict, **s
         "fingerprint": np.array(fingerprint(fields)),
         "fields_json": np.array(json.dumps(fields, sort_keys=True)),
     }
+    if bias is not None:
+        payload["bias"] = np.asarray(bias, dtype=np.float64)
+    if repair is not None:
+        payload["repair_json"] = np.array(json.dumps(repair, sort_keys=True))
     for key, value in scalars.items():
         payload[key] = np.array(value)
     np.savez(path, **payload)
@@ -273,6 +294,10 @@ def load_field_weights(path=DEFAULT_FIELD_PATH, *, expect_fields: Optional[Dict]
         bundle["readout_gain"] = (
             float(data["readout_gain"]) if "readout_gain" in data.files else 1.0
         )
+        if "bias" in data.files:
+            bundle["bias"] = np.array(data["bias"], dtype=np.float64)
+        if "repair_json" in data.files:
+            bundle["repair"] = json.loads(str(data["repair_json"]))
     n_neurons = int(w_out.shape[1])
     bundle.update({
         "n_neurons": n_neurons,
@@ -320,6 +345,10 @@ def load_weights(path=DEFAULT_WEIGHTS_PATH, *, expect_fields: Optional[Dict] = N
             "fingerprint": str(data["fingerprint"]),
             "fields": fields,
         }
+        if "bias" in data.files:
+            bundle["bias"] = np.array(data["bias"], dtype=np.float64)
+        if "repair_json" in data.files:
+            bundle["repair"] = json.loads(str(data["repair_json"]))
     # dimensions/scalars: arrays are authoritative, the rest come from the fields
     n_neurons = int(w_out.shape[1])
     bundle.update(

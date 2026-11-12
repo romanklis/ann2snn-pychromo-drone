@@ -182,3 +182,4 @@ def test_api_404_is_json(client):
 def test_static_pages(client):
     assert client.get("/").status_code == 200
     assert client.get("/extended").status_code == 200
+    assert client.get("/repair").status_code == 200

@@ -26,6 +26,7 @@ as `assets/demo.mp4` with higher quality / smaller size).*
 | [control.md](control.md) | Where the controllers live and how they are executed |
 | [slam.md](slam.md) | SLAM-lite mapping, replanning, and the "what the drone knows" panel |
 | [limitations.md](limitations.md) | Per-claim status and the honest list of limitations |
+| [repair.md](repair.md) | White-space repair of the connectome SNN: audit, edit DSL, LLM loop, inspector |
 
 Every equation and diagram cites the module and line it comes from, so the
 documentation tracks the code. The authoritative behavioural configuration is the

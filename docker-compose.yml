@@ -55,6 +55,8 @@ services:
     image: drone6dof-dashboard:latest
     ports:
       - "${PORT:-8080}:8080"
+    environment:
+      - DRONE6DOF_REPAIR_ROOT=/app/out/repair
     volumes:
       - ./weights:/app/weights:ro
       - ./out:/app/out

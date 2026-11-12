@@ -12,6 +12,7 @@ export default defineConfig({
       input: {
         main: resolve(here, "index.html"),
         extended: resolve(here, "extended.html"),
+        repair: resolve(here, "repair.html"),
       },
     },
   },

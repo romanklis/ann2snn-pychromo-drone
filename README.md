@@ -58,7 +58,8 @@ the ANN→SNN transfer, and the UKF + PyChrono simulation loop. See
 **Deep dives (`docs/`)** — [Architecture](docs/architecture.md) ·
 [Physics](docs/physics.md) · [Estimation](docs/estimation.md) ·
 [Sensing](docs/sensing.md) · [Field](docs/field.md) · [Control](docs/control.md) ·
-[SLAM](docs/slam.md) · [Limitations](docs/limitations.md)
+[SLAM](docs/slam.md) · [Limitations](docs/limitations.md) ·
+[White-space repair](docs/repair.md)
 
 ## Documentation
 
@@ -70,6 +71,8 @@ Detailed, source-cited documentation lives in [`docs/`](docs/index.md):
 - [Sensing](docs/sensing.md) — obstacle geometry and the LiDAR scan + cues
 - [Potential field](docs/field.md) — field methodology, structured ANN → SNN
 - [Control](docs/control.md) — controllers and the execution loop
+- [White-space repair](docs/repair.md) — audit and repair the connectome SNN
+  with gradient-free edits and an optional LLM proposer
 
 Schematics are tracked as replaceable placeholders under
 [`docs/assets/schematics/`](docs/assets/schematics/README.md).
@@ -107,6 +110,8 @@ make test         # full test suite in-container under Xvfb
 
 make train        # distil the connectome ANN/SNN -> weights/ (torch image)
 make dashboard    # build + run the comparison dashboard on :8080
+make repair-audit # probe the shift suite + audit SNN white space
+make repair       # run the gradient-free white-space repair loop
 ```
 
 Override variables: `make demo CONTROLLER=snn CAMERA=follow`,
@@ -177,6 +182,18 @@ then a slim Python runtime serves it) and runs it on `http://localhost:8080`.
 - **Extended page** (`/extended`): multi-lane traces (position, velocity,
   attitude, tracking error, command, telemetry), a frame readout, and
   metrics/weights tables.
+- **Repair page** (`/repair`): white-space repair runs from `out/repair/` —
+  success by cycle, cycle-to-cycle metric/trajectory comparison,
+  accepted/rejected edits, the 1000-neuron silent/live/edited strip, weight
+  deltas, before/after replay, and the LLM transcript. Acceptance is monotonic
+  on final progress with nominal-regression/collision guards; quietness is a
+  warning unless `--strict-quiet` is set. The default repair target is
+  `goal_shift`; `goal_behind_wall` is the harder OOD case. Resume a run with
+  `REPAIR_RESUME=<run_id>` to append cycles. It is read-only and
+  does not need torch; see [docs/repair.md](docs/repair.md). The
+  proposer supports OpenAI-compatible endpoints and DeepSeek
+  (`make repair-deepseek`); copy `.env.example` to the gitignored `.env` for
+  credentials.
 
 ### Interactive goal
 
@@ -320,6 +337,10 @@ make train           # distil + export into weights/
 A bundle trained for a different plant/scene/teacher is refused by the
 fingerprint guard, with instructions to rerun `make train`.
 
+White-space repair never overwrites the base bundle: repaired artifacts go to
+`weights/repair/<run_id>.npz` and keep the base fingerprint, with the edit
+metadata in `repair_json`. See [docs/repair.md](docs/repair.md).
+
 ## Tests
 
 `make test` runs the suite in the PyChrono image under Xvfb. Flask API tests run
@@ -347,6 +368,9 @@ in the dashboard image (`docker run --rm --entrypoint sh drone6dof-dashboard
 - `tests/test_benchmark.py` — dashboard report contract.
 - `tests/test_viz_smoke.py` — builds the Chrono scene and renders one frame.
 - `server/tests/test_api.py` — health, catalogue, simulate, benchmark, static.
+- `tests/test_repair_core.py` — SNN bias/spike instrumentation, white-space
+  audit, DSL quietness/liveness, bundle round-trip, LLM JSON parsing, artifacts.
+- `server/tests/test_repair_api.py` — read-only repair inspector routes.
 
 ## CLI
 
@@ -387,11 +411,14 @@ src/drone6dof/       plant, estimator (UKF), sensors, controllers
                      (ds/pid/ann/snn/field_ann/field_snn), planner (A*), guidance,
                      slam (occupancy mapper), field, policy, geometry,
                      scene/reference/task, weights, train, sim, benchmark, viz, cli
-server/              Flask API (app.py, wsgi.py) + tests
-web/                 Vite + Plotly frontend (hero + extended)
-weights/             committed connectome + field bundles + torch reference I/O
-tools/               compare_controllers.py, field_viz.py (parity oracle snippet)
-docs/                architecture / physics / estimation / sensing / field / control
+src/drone6dof/repair/ white-space audit, shift suite, edit DSL, proposers, loop
+server/              Flask API (app.py, repair_api.py, wsgi.py) + tests
+web/                 Vite + Plotly frontend (hero + extended + repair)
+weights/             committed connectome + field bundles + torch reference I/O;
+                     repaired bundles go to weights/repair/
+tools/               compare_controllers.py, field_viz.py, repair.py
+docs/                architecture / physics / estimation / sensing / field / control /
+                     slam / repair / limitations
 Dockerfile           PyChrono+irrlicht demo image
 Dockerfile.train     CPU-torch distillation image
 Dockerfile.dashboard node build + Flask runtime

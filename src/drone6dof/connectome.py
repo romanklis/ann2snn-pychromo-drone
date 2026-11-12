@@ -156,6 +156,7 @@ class RateCodedConnectomeSNN:
         v_th: float = DEFAULTS["v_th"],
         limit: float = 12.0,
         readout_gain: float = 1.0,
+        bias: Optional[np.ndarray] = None,
     ) -> None:
         self.w_in = np.asarray(w_in, dtype=np.float64)
         self.w_out = np.asarray(w_out, dtype=np.float64)
@@ -166,16 +167,29 @@ class RateCodedConnectomeSNN:
         self.v_th = float(v_th)
         self.limit = float(limit)
         self.readout_gain = float(readout_gain)
+        if bias is None:
+            self.bias = np.zeros(self.n_neurons, dtype=np.float64)
+        else:
+            self.bias = np.asarray(bias, dtype=np.float64).reshape(-1).copy()
+            if self.bias.shape[0] != self.n_neurons:
+                raise ValueError(
+                    f"bias has {self.bias.shape[0]} entries, expected {self.n_neurons}"
+                )
         self.reset()
 
     def reset(self) -> None:
         self.v = np.zeros(self.n_neurons, dtype=np.float64)
         self.s = np.zeros(self.n_neurons, dtype=np.float64)
         self.last_spikes = np.zeros(self.n_neurons, dtype=np.uint8)
+        #: total spikes emitted by each neuron since the last reset
+        self.spike_counts = np.zeros(self.n_neurons, dtype=np.int64)
+        #: number of frames in which each neuron fired at least once
+        self.spike_frames = np.zeros(self.n_neurons, dtype=np.int64)
+        self.frames = 0
 
     def forward_input(self, x: np.ndarray) -> np.ndarray:
         x = np.asarray(x, dtype=np.float64).reshape(-1)
-        i_input = self.w_in @ x
+        i_input = self.w_in @ x + self.bias
         motor = np.zeros(self.n_out, dtype=np.float64)
         any_spike = np.zeros(self.n_neurons, dtype=np.float64)
         for _ in range(self.micro_steps):
@@ -185,8 +199,11 @@ class RateCodedConnectomeSNN:
             self.v = self.v - self.s * self.v_th          # soft reset
             motor += self.w_out @ self.s
             any_spike = np.maximum(any_spike, self.s)     # fired at any micro-step
+            self.spike_counts += self.s.astype(np.int64)
         # record which neurons fired during the frame (not just the last micro-step)
         self.last_spikes = any_spike.astype(np.uint8)
+        self.spike_frames += self.last_spikes.astype(np.int64)
+        self.frames += 1
         return np.clip(motor / self.micro_steps * self.readout_gain,
                        -self.limit, self.limit)
 
@@ -231,6 +248,7 @@ class ConnectomeController:
         self.sensor = sensor or SensorConfig()
         self._rng = np.random.default_rng(self.sensor.seed)
         self._last_scan = None
+        self._last_input = None
 
         edges = np.asarray(bundle["edges"], dtype=np.int64)
         polarity = np.asarray(bundle["polarity"], dtype=np.float64)
@@ -248,6 +266,8 @@ class ConnectomeController:
                 micro_steps=int(bundle.get("micro_steps", 10)),
                 v_th=float(bundle.get("v_th", 1.0)),
                 limit=self.action_limit,
+                readout_gain=float(bundle.get("readout_gain", 1.0)),
+                bias=bundle.get("bias"),
             )
         self._last: Dict[str, float] = {}
 
@@ -257,6 +277,7 @@ class ConnectomeController:
         self._rng = np.random.default_rng(self.sensor.seed)
         self._last = {}
         self._last_scan = None
+        self._last_input = None
 
     def act(self, state: np.ndarray, ref) -> np.ndarray:
         scene = (getattr(ref, "meta", None) or {}).get("scene")
@@ -268,6 +289,7 @@ class ConnectomeController:
             sensor=self.sensor, rng=self._rng, pos_dim=3,
         )
         self._last_scan = ranges
+        self._last_input = np.asarray(features, dtype=np.float64).copy()
         u = self.net.forward_input(features)
         if self.kind == "ann":
             self._last = dict(self.net.last_telemetry)
@@ -285,9 +307,29 @@ class ConnectomeController:
         return getattr(self.net, "last_spikes", None)
 
     @property
+    def last_spikes_all(self):
+        """All-neuron spike vector of the last frame (SNN), else ``None``."""
+        return getattr(self.net, "last_spikes", None)
+
+    @property
+    def spike_counts(self):
+        """Per-neuron spike totals since reset (SNN), else ``None``."""
+        return getattr(self.net, "spike_counts", None)
+
+    @property
+    def spike_frames(self):
+        """Per-neuron active-frame totals since reset (SNN), else ``None``."""
+        return getattr(self.net, "spike_frames", None)
+
+    @property
     def last_scan(self):
         """Raw LiDAR range profile of the last frame (or ``None`` before acting)."""
         return self._last_scan
+
+    @property
+    def last_input(self):
+        """46-D policy feature vector of the last frame (or ``None``)."""
+        return self._last_input
 
     @property
     def scan_angles(self):

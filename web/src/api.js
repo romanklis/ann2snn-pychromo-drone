@@ -21,6 +21,30 @@ export async function getHealth() {
   return readJson(await fetch("/api/health"));
 }
 
+export async function getRepairRuns() {
+  return readJson(await fetch("/api/repair/runs"));
+}
+
+export async function getRepairRun(runId) {
+  return readJson(await fetch(`/api/repair/runs/${encodeURIComponent(runId)}`));
+}
+
+export async function getRepairCycle(runId, cycle) {
+  return readJson(await fetch(`/api/repair/runs/${encodeURIComponent(runId)}/cycles/${cycle}`));
+}
+
+export async function getRepairActivity(runId) {
+  return readJson(await fetch(`/api/repair/runs/${encodeURIComponent(runId)}/activity`));
+}
+
+export async function getRepairTraces(runId) {
+  return readJson(await fetch(`/api/repair/runs/${encodeURIComponent(runId)}/traces`));
+}
+
+export async function getRepairWeights(runId, cycle) {
+  return readJson(await fetch(`/api/repair/runs/${encodeURIComponent(runId)}/weights/${cycle}`));
+}
+
 export async function runBenchmark(controllers, { steps = 500, seed = 0, goal = null, scene = null, mapSource = null, from = null, to = null } = {}) {
   const payload = { controllers, steps, seed };
   if (Array.isArray(goal) && goal.length === 3) payload.goal = goal;

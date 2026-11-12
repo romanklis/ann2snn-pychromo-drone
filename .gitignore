@@ -5,7 +5,11 @@ build/
 dist/
 .pytest_cache/
 out/
+weights/repair/
 *.csv
+.env
+.env.*
+!.env.example
 web/node_modules/
 server/static/
 .kilo 
